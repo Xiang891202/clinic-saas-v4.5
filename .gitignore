@@ -1,0 +1,46 @@
+﻿# ==================== 依賴與建置輸出 ====================
+node_modules/
+.pnpm-store/
+dist/
+build/
+.turbo/
+out/
+
+# ==================== 環境變數（機密資訊） ====================
+.env
+.env.local
+.env.*.local
+*.env
+
+# ==================== 日誌檔案 ====================
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log
+
+# ==================== 作業系統特定檔案 ====================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==================== IDE / 編輯器 ====================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.vscode/settings.json
+
+# ==================== 暫存與快取 ====================
+.cache/
+*.tmp
+*.temp
+coverage/
+.nyc_output/
+
+# ==================== 其他 ====================
+.DS_Store
+*.pem
+*.p12
