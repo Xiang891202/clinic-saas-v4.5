@@ -17,7 +17,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          # 使用 22 取代 20，避免棄用警告
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -38,27 +37,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      # ===== 後端 =====
-      - name: Install Backend Dependencies
-        run: |
-          cd backend
-          pnpm install
+      # ===== 從根目錄安裝所有依賴 =====
+      - name: Install all dependencies
+        run: pnpm install
 
+      # ===== 建置後端 =====
       - name: Build Backend
-        run: |
-          cd backend
-          pnpm run build || echo "⚠️ 尚未定義 build 腳本，跳過"
+        run: pnpm --filter backend run build || echo "⚠️ 尚未定義 build 腳本，跳過"
 
-      # ===== 前端 =====
-      - name: Install Frontend Dependencies
-        run: |
-          cd frontend
-          pnpm install
-
+      # ===== 建置前端 =====
       - name: Build Frontend
-        run: |
-          cd frontend
-          pnpm run build
+        run: pnpm --filter frontend run build
 
       # ===== 測試佔位 =====
       - name: Run tests (placeholder)
