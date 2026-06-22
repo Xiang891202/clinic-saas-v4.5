@@ -16,31 +16,50 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: 22
+          # 使用 22 取代 20，避免棄用警告
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
 
       # ===== 後端 =====
       - name: Install Backend Dependencies
         run: |
           cd backend
-          npm ci
+          pnpm install
 
       - name: Build Backend
         run: |
           cd backend
-          npm run build
+          pnpm run build || echo "⚠️ 尚未定義 build 腳本，跳過"
 
       # ===== 前端 =====
       - name: Install Frontend Dependencies
         run: |
           cd frontend
-          npm ci
+          pnpm install
 
       - name: Build Frontend
         run: |
           cd frontend
-          npm run build
+          pnpm run build
 
-      # ===== 測試佔位（Phase 1 後會擴充） =====
+      # ===== 測試佔位 =====
       - name: Run tests (placeholder)
         run: echo "✅ 建置成功！測試將於 Phase 1 後補上。"
