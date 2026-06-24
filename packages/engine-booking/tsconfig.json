@@ -6,12 +6,13 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
     "outDir": "./dist",
-    // "rootDir": "./src",   // ✅ 刪除或註解這行
-    "paths": {
-      "@clinic/*": ["../packages/*/src"]
-    }
+    "rootDir": "./src"
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts", "node_modules"]
 }

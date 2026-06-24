@@ -1,0 +1,19 @@
+{
+  "name": "@clinic/cron",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
+    "dotenv": "^17.4.2",
+    "ioredis": "^5.11.1",
+    "node-cron": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

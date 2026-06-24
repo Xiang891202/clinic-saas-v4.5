@@ -1,0 +1,12 @@
+{
+	"devDependencies": {
+		"@types/nodemailer": "^8.0.1",
+		"@vitest/coverage-v8": "^4.1.9",
+		"vitest": "^4.1.9"
+	},
+	"scripts": {
+		"dev:api": "cd backend && pnpm dev",
+		"dev:worker": "cd apps/worker && pnpm dev",
+		"dev:cron": "cd apps/cron && pnpm dev"
+	}
+}
