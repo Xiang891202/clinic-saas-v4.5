@@ -47,8 +47,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
+import { apiFetch } from "../../api/index";
 
 const router = useRouter();
 const saving = ref(false);
@@ -63,11 +64,10 @@ const form = ref({
   birth_date: "",
 });
 
-// ========== 載入目前資料 ==========
 const loadProfile = async () => {
   try {
     const token = localStorage.getItem("auth_token");
-    const res = await fetch("/api/patient/profile", {
+    const res = await apiFetch("/api/patient/profile", {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await res.json();
@@ -83,9 +83,7 @@ const loadProfile = async () => {
   }
 };
 
-// ========== 儲存資料 ==========
 const saveProfile = async () => {
-  // ✅ 基本驗證
   if (!form.value.name_family || !form.value.name_given || !form.value.telecom_phone) {
     error.value = "請填寫完整資料（姓名和手機為必填）";
     return;
@@ -97,10 +95,9 @@ const saveProfile = async () => {
 
   try {
     const token = localStorage.getItem("auth_token");
-    const res = await fetch("/api/patient/profile", {
+    const res = await apiFetch("/api/patient/profile", {
       method: "PUT",
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(form.value),
@@ -111,7 +108,6 @@ const saveProfile = async () => {
     success.value = true;
     localStorage.setItem("auth_user_name", form.value.name_given);
 
-    // ✅ 延遲跳轉
     setTimeout(() => {
       router.replace("/patient-home");
     }, 800);
@@ -122,7 +118,19 @@ const saveProfile = async () => {
   }
 };
 
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') {
+    console.log('🔄 页面激活，重新加载个人资料');
+    loadProfile();
+  }
+};
+
 onMounted(() => {
   loadProfile();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 </script>

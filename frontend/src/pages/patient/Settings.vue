@@ -49,8 +49,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
+import { apiFetch } from "../../api/index";
 
 const router = useRouter();
 const icalUrl = ref("");
@@ -61,7 +62,7 @@ const lineError = ref("");
 const loadSettings = async () => {
   try {
     const token = localStorage.getItem("auth_token");
-    const res = await fetch("/api/patient/settings", {
+    const res = await apiFetch("/api/patient/settings", {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await res.json();
@@ -80,7 +81,6 @@ const copyIcalUrl = async () => {
     copySuccess.value = true;
     setTimeout(() => (copySuccess.value = false), 3000);
   } catch {
-    // Fallback
     const input = document.createElement("input");
     input.value = icalUrl.value;
     document.body.appendChild(input);
@@ -93,17 +93,27 @@ const copyIcalUrl = async () => {
 };
 
 const bindLine = () => {
-  // Phase 1: 引導到 LINE 綁定頁面（目前先顯示提示）
-  // Phase 2 會完整實作 LINE Login 綁定
   alert("LINE 綁定功能將在下一階段開放，敬請期待！");
-  // 未來實作：window.location.href = "/line-bind";
 };
 
 const unbindLine = () => {
   if (!confirm("確定要解除 LINE 綁定嗎？")) return;
-  // Phase 2 實作
   alert("解除綁定功能將在下一階段開放");
 };
 
-onMounted(loadSettings);
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') {
+    console.log('🔄 页面激活，重新加载设置');
+    loadSettings();
+  }
+};
+
+onMounted(() => {
+  loadSettings();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+});
 </script>

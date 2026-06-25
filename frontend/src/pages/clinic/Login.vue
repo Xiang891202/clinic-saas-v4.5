@@ -21,6 +21,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useRouter } from "vue-router";
+import { apiFetch } from "../../api/index";
 
 const router = useRouter();
 const email = ref("");
@@ -30,22 +31,19 @@ const error = ref("");
 const handleLogin = async () => {
   error.value = "";
   try {
-    const res = await fetch("/api/auth/clinic/login", {
+    const res = await apiFetch("/api/auth/clinic/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      skipTenant: true,
       body: JSON.stringify({ email: email.value, password: password.value }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "登入失敗");
 
-    // ✅ 統一使用 auth_* 前綴
     localStorage.setItem("auth_token", data.data.token);
     localStorage.setItem("auth_role", data.data.user.role);
     localStorage.setItem("auth_tenant_id", data.data.user.tenant_id);
     localStorage.setItem("auth_user_id", data.data.user.id);
     localStorage.setItem("auth_user_name", data.data.user.email);
-
-    // ✅ 診所端額外儲存（保留向後相容）
     localStorage.setItem("clinic_token", data.data.token);
     localStorage.setItem("clinic_tenant_id", data.data.user.tenant_id);
 

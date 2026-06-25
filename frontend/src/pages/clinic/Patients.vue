@@ -62,8 +62,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
+import { apiFetch } from "../../api/index";
 
 const router = useRouter();
 const loading = ref(false);
@@ -97,9 +98,7 @@ const fetchPatients = async () => {
     });
     if (search.value) params.append("search", search.value);
 
-    const res = await fetch(`/api/clinic/patients?${params.toString()}`, {
-      headers: { "x-tenant-id": tenantId },
-    });
+    const res = await apiFetch(`/api/clinic/patients?${params.toString()}`);
     const data = await res.json();
     if (res.ok) {
       patients.value = data.data || [];
@@ -126,5 +125,19 @@ const nextPage = () => {
   }
 };
 
-onMounted(fetchPatients);
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') {
+    console.log('🔄 页面激活，重新加载病人列表');
+    fetchPatients();
+  }
+};
+
+onMounted(() => {
+  fetchPatients();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+});
 </script>

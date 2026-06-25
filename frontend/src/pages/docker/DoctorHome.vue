@@ -15,22 +15,25 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useRouter } from "vue-router";
-import { getAuthStorage, logout } from "@clinic/engine-auth";
 
 const router = useRouter();
 const userName = ref("");
 
-onMounted(() => {
-  const auth = getAuthStorage();
-  if (!auth.token) {
-    router.replace("/");
-    return;
-  }
-  userName.value = auth.name || "醫師";
-});
+const checkAuth = () => {
+  const name = localStorage.getItem("auth_user_name") || "醫師";
+  userName.value = name;
+};
 
 const handleLogout = () => {
-  logout();
+  localStorage.removeItem("auth_token");
+  localStorage.removeItem("auth_role");
+  localStorage.removeItem("auth_tenant_id");
+  localStorage.removeItem("auth_user_id");
+  localStorage.removeItem("auth_user_name");
+  localStorage.removeItem("clinic_token");
+  localStorage.removeItem("clinic_tenant_id");
   router.push("/");
 };
+
+onMounted(checkAuth);
 </script>

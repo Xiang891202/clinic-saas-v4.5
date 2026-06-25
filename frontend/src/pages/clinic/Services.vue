@@ -117,8 +117,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
+import { apiFetch } from "../../api/index";
 
 const router = useRouter();
 const loading = ref(false);
@@ -154,7 +155,7 @@ const fetchServices = async () => {
 
   loading.value = true;
   try {
-    const res = await fetch("/api/clinic/services", { headers: { "x-tenant-id": tenantId } });
+    const res = await apiFetch("/api/clinic/services");
     const data = await res.json();
     if (res.ok) services.value = data.data || [];
     else throw new Error(data.error);
@@ -200,18 +201,11 @@ const saveService = async () => {
   }
 
   saving.value = true;
-  const tenantId = localStorage.getItem("clinic_tenant_id");
-
   try {
     const url = isEditing.value ? `/api/clinic/services/${editingId.value}` : "/api/clinic/services";
     const method = isEditing.value ? "PUT" : "POST";
-
-    const res = await fetch(url, {
+    const res = await apiFetch(url, {
       method,
-      headers: {
-        "Content-Type": "application/json",
-        "x-tenant-id": tenantId!,
-      },
       body: JSON.stringify(form.value),
     });
     const data = await res.json();
@@ -228,20 +222,35 @@ const saveService = async () => {
 
 const deleteService = async (id: string) => {
   if (!confirm("確定要刪除此服務嗎？若有預約記錄將改為停用")) return;
-
-  const tenantId = localStorage.getItem("clinic_tenant_id");
-  const res = await fetch(`/api/clinic/services/${id}`, {
-    method: "DELETE",
-    headers: { "x-tenant-id": tenantId! },
-  });
-  const data = await res.json();
-  if (res.ok) {
-    alert(data.message || "操作成功");
-    await fetchServices();
-  } else {
-    alert(data.error || "操作失敗");
+  try {
+    const res = await apiFetch(`/api/clinic/services/${id}`, {
+      method: "DELETE",
+    });
+    const data = await res.json();
+    if (res.ok) {
+      alert(data.message || "操作成功");
+      await fetchServices();
+    } else {
+      alert(data.error || "操作失敗");
+    }
+  } catch (err) {
+    console.error(err);
   }
 };
 
-onMounted(fetchServices);
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') {
+    console.log('🔄 页面激活，重新加载服务列表');
+    fetchServices();
+  }
+};
+
+onMounted(() => {
+  fetchServices();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+});
 </script>

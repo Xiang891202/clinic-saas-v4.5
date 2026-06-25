@@ -4,22 +4,19 @@ import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import path from "path";
+import ical from 'ical-generator';
 
-// 從專案根目錄載入 .env
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
-// ========== 初始化 Redis（設定 maxRetriesPerRequest: null） ==========
 const redis = new Redis(process.env.REDIS_URL!, {
   maxRetriesPerRequest: null,
 });
 
-// ========== 初始化 Supabase ==========
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// ========== 初始化 Email Transporter ==========
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT),
@@ -30,19 +27,119 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// ========== Queue 定義與匯出 ==========
 export const notificationQueue = new Queue("notification.queue", {
   connection: redis,
 });
+
+// ========== 通知用量記錄 ==========
+// apps/worker/src/index.ts
+
+async function recordUsage(tenantId: string, channel: string, status: "sent" | "failed") {
+  const yearMonth = new Date().toISOString().slice(0, 7);
+
+  // 先查询当前记录
+  const { data: existing } = await supabase
+    .from("notification_usage")
+    .select("sent_count, failed_count")
+    .eq("tenant_id", tenantId)
+    .eq("year_month", yearMonth)
+    .eq("channel", channel)
+    .maybeSingle();
+
+  const newSent = (existing?.sent_count || 0) + (status === "sent" ? 1 : 0);
+  const newFailed = (existing?.failed_count || 0) + (status === "failed" ? 1 : 0);
+
+  const { error } = await supabase
+    .from("notification_usage")
+    .upsert(
+      {
+        tenant_id: tenantId,
+        year_month: yearMonth,
+        channel: channel,
+        sent_count: newSent,
+        failed_count: newFailed,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "tenant_id, year_month, channel",
+      }
+    );
+
+  if (error) {
+    console.error("❌ 記錄通知用量失敗:", error);
+  }
+}
+
+// ========== ✅ 產生 .ics 行事曆內容（支援新增/修改/取消） ==========
+function generateICS(booking: any, type: 'created' | 'modified' | 'cancelled'): string {
+  const slot = booking.slot_instances;
+  const startTime = new Date(`${slot.slot_date}T${slot.start_time}`);
+  const endTime = new Date(`${slot.slot_date}T${slot.end_time}`);
+  
+  // ✅ 使用預約 ID 作為 UID（永遠不變）
+  const uid = `booking-${booking.id}@clinic-saas.com`;
+  
+  // ✅ SEQUENCE：每次修改時遞增（用 updated_at 時間戳作為版本）
+  const sequence = type === 'modified' 
+    ? Math.floor(new Date(booking.updated_at).getTime() / 1000) 
+    : 0;
+
+  // ✅ 根據類型決定 METHOD
+  let method: 'REQUEST' | 'CANCEL' = 'REQUEST';
+  let status: 'CONFIRMED' | 'CANCELLED' = 'CONFIRMED';
+  let summary = `診所預約 - ${booking.services?.name || '看診'}`;
+  let description = `醫師：${booking.doctors?.name || '未知醫師'}\n服務：${booking.services?.name || '未知服務'}`;
+  let location = '診所地址';
+  let alarms: { trigger: number; action: string; description: string }[] = [];
+
+  if (type === 'cancelled') {
+    method = 'CANCEL';
+    status = 'CANCELLED';
+    summary = '❌ 預約已取消';
+    description = '此預約已被取消，請從行事曆中移除。';
+    location = '';
+    // 取消時不發送提醒
+  } else {
+    // 新增或修改時，加入 30 分鐘提醒
+    alarms = [{ trigger: 30 * 60, action: 'DISPLAY', description: '預約時間快到了！' }];
+  }
+
+  const calendar = ical({
+    name: '診所預約系統',
+    timezone: 'Asia/Taipei',
+    method: method,  // ✅ 關鍵！
+    prodId: { company: 'Clinic SaaS', product: 'Appointment' },
+  });
+
+  calendar.createEvent({
+    uid: uid,                    // ✅ 唯一識別碼
+    sequence: sequence,          // ✅ 版本號
+    start: startTime,
+    end: endTime,
+    summary: summary,
+    description: description,
+    location: location,
+    status: status,
+    alarms: alarms,
+    organizer: {
+      name: '診所預約系統',
+      email: process.env.SMTP_USER,
+    },
+    ...(type === 'cancelled' ? { 
+      'X-METHOD': 'CANCEL', 
+      'X-CANCELLED': 'TRUE' 
+    } : {}),
+  });
+
+  return calendar.toString();
+}
 
 // ========== Worker 主要邏輯 ==========
 async function startWorker() {
   let lineClient: any = null;
 
-  // 動態載入 LINE（若有 Token）
   if (process.env.LINE_CHANNEL_ACCESS_TOKEN) {
     try {
-      // ✅ 修正：LINE v8+ 必須使用 messagingApi 模組
       const lineModule = await import("@line/bot-sdk");
       lineClient = new lineModule.messagingApi.MessagingApiClient({
         channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
@@ -58,16 +155,14 @@ async function startWorker() {
   const worker = new Worker(
     "notification.queue",
     async (job) => {
-      const { type, booking_id } = job.data;
+      const { type, booking_id, tenant_id } = job.data;
       console.log(`📩 處理通知: ${type}, 預約 ${booking_id}`);
 
-      // 🛡️ 防禦性處理：跳過測試 UUID 字串，避免資料庫噴 22P02 語法錯誤
       if (booking_id === "test-uuid-placeholder") {
-        console.log("🧪 收到測試任務預覽，跳過資料庫查詢與發送");
+        console.log("🧪 收到測試任務預覽，跳過");
         return;
       }
 
-      // 查詢預約詳細資料
       const { data: booking, error } = await supabase
         .from("booking_events")
         .select(`
@@ -87,6 +182,7 @@ async function startWorker() {
 
       const patient = booking.patients;
       const slot = booking.slot_instances;
+      const targetTenantId = tenant_id || booking.tenant_id;
 
       const statusMap = {
         created: "預約成功",
@@ -109,42 +205,65 @@ async function startWorker() {
 診所敬上
       `;
 
-      // 發送 Email
+      let emailSent = false;
+
+      // ===== 發送 Email（含 .ics） =====
       if (patient.telecom_email) {
         try {
+          // ✅ 使用新的 generateICS 函數，傳入 type 參數
+          const icsContent = generateICS(booking, type);
+
+          // ✅ 根據類型決定檔案名稱
+          let filename = '預約提醒.ics';
+          if (type === 'cancelled') filename = '預約取消.ics';
+          else if (type === 'modified') filename = '預約更新.ics';
+
           await transporter.sendMail({
             from: process.env.SMTP_USER,
             to: patient.telecom_email,
             subject: `[診所系統] ${subject}`,
             text: text,
+            attachments: [
+              {
+                filename: filename,
+                content: icsContent,
+                contentType: 'text/calendar; charset=utf-8; method=' + (type === 'cancelled' ? 'CANCEL' : 'REQUEST'),
+                contentDisposition: 'inline',
+              },
+            ],
           });
-          console.log(`📧 Email 已發送至 ${patient.telecom_email}`);
-          await logNotification(booking_id, "email", "sent");
+          console.log(`📧 Email（含 .ics）已發送至 ${patient.telecom_email}`);
+          await logNotification(booking_id, 'email', 'sent');
+          await recordUsage(targetTenantId, 'email', 'sent');
+          await recordUsage(targetTenantId, 'email', 'sent');  // ✅ 成功时记录
+          emailSent = true;
         } catch (err) {
           console.error(`❌ Email 發送失敗:`, err);
-          await logNotification(booking_id, "email", "failed", { error: String(err) });
+          await logNotification(booking_id, 'email', 'failed', { error: String(err) });
+          await recordUsage(targetTenantId, 'email', 'failed');
+          await recordUsage(targetTenantId, 'email', 'failed');  // ✅ 失败时也记录
         }
-      } else {
-        console.warn(`⚠️ 病人 ${booking.patient_id} 無 Email，跳過通知`);
       }
 
-      // 發送 LINE
+      // ===== 發送 LINE =====
       if (lineClient && patient.line_user_id) {
         try {
-          // ✅ 修正：LINE v8+ 的 pushMessage 傳參結構已改變，改為單一物件
           await lineClient.pushMessage({
             to: patient.line_user_id,
-            messages: [{
-              type: "text",
-              text: text,
-            }]
+            messages: [{ type: "text", text: text }]
           });
           console.log(`💬 LINE 已發送至 ${patient.line_user_id}`);
           await logNotification(booking_id, "line", "sent");
+          await recordUsage(targetTenantId, "line", "sent");
         } catch (err) {
           console.error(`❌ LINE 發送失敗:`, err);
           await logNotification(booking_id, "line", "failed", { error: String(err) });
+          await recordUsage(targetTenantId, "line", "failed");
         }
+      }
+
+      if (!emailSent && !patient.line_user_id) {
+        console.warn(`⚠️ 預約 ${booking_id} 無任何通知管道可用`);
       }
     },
     {
@@ -164,10 +283,8 @@ async function startWorker() {
 
   console.log("🚀 Worker 已啟動，監聽 notification.queue");
 
-  // ===== 🧪 測試任務 =====
   setTimeout(async () => {
     try {
-      // ✅ 修正：改用虛擬標記，並避免直接傳入非法 UUID 格式字串
       await notificationQueue.add("test", {
         type: "test",
         booking_id: "test-uuid-placeholder",
@@ -179,7 +296,6 @@ async function startWorker() {
   }, 2000);
 }
 
-// 啟動
 startWorker().catch((err) => {
   console.error("❌ Worker 启动失败:", err);
   process.exit(1);

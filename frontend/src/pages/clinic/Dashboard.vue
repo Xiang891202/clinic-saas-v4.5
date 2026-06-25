@@ -24,7 +24,6 @@
       </div>
     </div>
 
-    <!-- ✅ 功能選單（兩列） -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 20px;">
       <router-link to="/clinic/appointments" style="padding: 14px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 8px; text-align: center; font-weight: bold;">
         📋 預約管理
@@ -43,47 +42,59 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
+import { apiFetch } from "../../api/index";
 
 const router = useRouter();
 const stats = ref({ total: 0, completed: 0, booked: 0, noshow: 0 });
 
-// ✅ 登出：清除所有 token（統一儲存 + 舊版儲存）
 const logout = () => {
-  // 統一儲存（auth_*）
   localStorage.removeItem("auth_token");
   localStorage.removeItem("auth_role");
   localStorage.removeItem("auth_tenant_id");
   localStorage.removeItem("auth_user_id");
   localStorage.removeItem("auth_user_name");
-
-  // 舊版診所儲存（clinic_*）
   localStorage.removeItem("clinic_token");
   localStorage.removeItem("clinic_tenant_id");
-
-  // 清除病人相關
   localStorage.removeItem("patient_token");
   localStorage.removeItem("patient_id");
   localStorage.removeItem("patient_name");
-
   router.push("/clinic/login");
 };
 
-onMounted(async () => {
+const fetchStats = async () => {
   const tenantId = localStorage.getItem("clinic_tenant_id") || localStorage.getItem("auth_tenant_id");
   if (!tenantId) return router.push("/clinic/login");
 
-  const res = await fetch("/api/clinic/appointments", {
-    headers: { "x-tenant-id": tenantId },
-  });
-  const data = await res.json();
-  if (data.data) {
-    const total = data.data.length;
-    const completed = data.data.filter((a: any) => a.status === "completed").length;
-    const booked = data.data.filter((a: any) => a.status === "booked" || a.status === "arrived").length;
-    const noshow = data.data.filter((a: any) => a.status === "noshow").length;
-    stats.value = { total, completed, booked, noshow };
+  try {
+    const res = await apiFetch("/api/clinic/appointments");
+    const data = await res.json();
+    if (data.data) {
+      const total = data.data.filter((a: any) => a.status !== "cancelled").length;
+      const completed = data.data.filter((a: any) => a.status === "completed").length;
+      const booked = data.data.filter((a: any) => a.status === "booked" || a.status === "arrived").length;
+      const noshow = data.data.filter((a: any) => a.status === "noshow").length;
+      stats.value = { total, completed, booked, noshow };
+    }
+  } catch (err) {
+    console.error(err);
   }
+};
+
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') {
+    console.log('🔄 页面激活，重新加载统计数据');
+    fetchStats();
+  }
+};
+
+onMounted(() => {
+  fetchStats();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 </script>

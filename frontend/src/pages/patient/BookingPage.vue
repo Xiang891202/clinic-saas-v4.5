@@ -29,13 +29,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, onUnmounted } from "vue";
+import { apiFetch } from "../../api/index";
 
-// ✅ 直接從 localStorage 讀取
 const patientId = localStorage.getItem("auth_user_id") || "";
 const tenantId = localStorage.getItem("auth_tenant_id") || "550e8400-e29b-41d4-a716-446655440000";
 
-// ✅ 計算今天的日期（格式：YYYY-MM-DD）
 const today = computed(() => {
   const now = new Date();
   return now.toISOString().split('T')[0];
@@ -51,7 +50,8 @@ const fetchSlots = async () => {
   loading.value = true;
   error.value = "";
   try {
-    const res = await fetch(`/api/booking/slots?date=${date.value}&patient_id=${patientId}`);
+    // 使用 apiFetch，自动添加 tenant_id，但这里我们需要手动指定 patient_id，不需要额外 header
+    const res = await apiFetch(`/api/booking/slots?date=${date.value}&patient_id=${patientId}`);
     if (!res.ok) throw new Error("查詢失敗");
     const data = await res.json();
     slots.value = data.data || [];
@@ -72,7 +72,6 @@ const bookSlot = async (slotId: string) => {
     return;
   }
 
-  // ✅ 檢查是否為過去的時間（今天且時間已過）
   const now = new Date();
   const slotDate = new Date(`${selectedSlot.slot_date}T${selectedSlot.start_time}`);
   if (slotDate < now) {
@@ -81,12 +80,8 @@ const bookSlot = async (slotId: string) => {
   }
 
   try {
-    const res = await fetch("/api/booking/appointments", {
+    const res = await apiFetch("/api/booking/appointments", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-tenant-id": tenantId,
-      },
       body: JSON.stringify({
         slot_instance_id: slotId,
         patient_id: patientId,
@@ -106,5 +101,20 @@ const bookSlot = async (slotId: string) => {
   }
 };
 
-onMounted(fetchSlots);
+// 页面激活时刷新
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') {
+    console.log('🔄 页面激活，重新加载可预约时段');
+    fetchSlots();
+  }
+};
+
+onMounted(() => {
+  fetchSlots();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+});
 </script>

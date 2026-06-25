@@ -7,7 +7,7 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
 import { useRouter } from "vue-router";
-import { getAuthStorage } from "@clinic/engine-auth";
+// import { getAuthStorage } from "@clinic/engine-auth";
 
 const router = useRouter();
 
@@ -20,7 +20,7 @@ onMounted(() => {
     const roleMap: Record<string, string> = {
       patient: "/patient-home",
       doctor: "/doctor-home",
-      clinic_admin: "/clinic-dashboard",
+      clinic_admin: "/clinic/dashboard",   // ✅ 修正為正確路徑
       admin: "/admin-home",
     };
     router.replace(roleMap[role] || "/patient-home");

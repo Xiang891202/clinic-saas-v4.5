@@ -1,13 +1,15 @@
 ﻿{
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "CommonJS",
+    "moduleResolution": "node10",     // 或者 "node" 但加上 ignoreDeprecations
+    "ignoreDeprecations": "6.0",      // 忽略 TS 6.0 弃用警告
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "outDir": "./dist",
-    // "rootDir": "./src",   // ✅ 刪除或註解這行
+    "rootDir": "./src",
+    "types": ["jest", "node"],
     "paths": {
       "@clinic/*": ["../packages/*/src"]
     }

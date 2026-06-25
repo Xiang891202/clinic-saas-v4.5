@@ -1,6 +1,5 @@
 ﻿// frontend/src/router/index.ts
 import { createRouter, createWebHistory } from "vue-router";
-import { getAuthStorage } from "@clinic/engine-auth";
 
 // ========== 頁面導入 ==========
 import HomePage from "../pages/HomePage.vue";
@@ -11,11 +10,18 @@ import PatientHome from "../pages/patient/PatientHome.vue";
 import PatientProfile from "../pages/patient/Profile.vue";
 import PatientSettings from "../pages/patient/Settings.vue";
 import DoctorHome from "../pages/docker/DoctorHome.vue";
+
+//管理員
 import AdminHome from "../pages/admin/AdminHome.vue";
+import AdminLogin from "../pages/admin/AdminLogin.vue";
+import AdminTenants from "../pages/admin/Tenants.vue";
+import AdminContracts from "../pages/admin/Contracts.vue";
+import AdminMonitor from "../pages/admin/Monitor.vue";
 
 // 病人功能
 import BookingPage from "../pages/patient/BookingPage.vue";
 import MyAppointmentsPage from "../pages/patient/MyAppointmentsPage.vue";
+import BookingEditPage from "../pages/patient/BookingEditPage.vue";
 
 // 診所端
 import ClinicLogin from "../pages/clinic/Login.vue";
@@ -35,12 +41,18 @@ const routes = [
   { path: "/patient/profile", component: PatientProfile, meta: { requiredRole: "patient", skipProfileCheck: true } },
   { path: "/patient/settings", component: PatientSettings, meta: { requiredRole: "patient" } },
   { path: "/doctor-home", component: DoctorHome, meta: { requiredRole: "doctor" } },
+
+  //管理員
   { path: "/admin-home", component: AdminHome, meta: { requiredRole: "admin" } },
+  { path: "/admin/login", component: AdminLogin },
+  { path: "/admin/tenants", component: AdminTenants, meta: { requiredRole: "admin" } },
+  { path: "/admin/contracts", component: AdminContracts, meta: { requiredRole: "admin" } },
+  { path: "/admin/monitor", component: AdminMonitor, meta: { requiredRole: "admin" } },
 
   // 病人功能
   { path: "/booking", component: BookingPage, meta: { requiredRole: "patient" } },
   { path: "/my-appointments", component: MyAppointmentsPage, meta: { requiredRole: "patient" } },
-
+  { path: "/booking/:id/edit", component: BookingEditPage, meta: { requiredRole: "patient" } },
   // 診所功能
   { path: "/clinic/dashboard", component: ClinicDashboard, meta: { requiredRole: "clinic_admin" } },
   { path: "/clinic/appointments", component: ClinicAppointments, meta: { requiredRole: "clinic_admin" } },
@@ -55,40 +67,39 @@ const router = createRouter({
 });
 
 // ============================================================
-// 🛡️ 路由守衛（修正為 return 模式，不使用 next 回調）
+// 🛡️ 路由守衛
 // ============================================================
 router.beforeEach((to, from) => {
-  // ✅ 直接從 localStorage 讀取
-  const token = localStorage.getItem("auth_token");
+  const token = localStorage.getItem("auth_token") || localStorage.getItem("clinic_token");
   const role = localStorage.getItem("auth_role") || "patient";
 
-  // 1️⃣ 公開頁面
-  const publicPages = ["/", "/email-login", "/clinic/login"];
+  // 公開頁面
+  const publicPages = ["/", "/email-login", "/clinic/login", "/admin/login"];
   if (publicPages.includes(to.path)) {
     if (token) {
       const roleMap: Record<string, string> = {
         patient: "/patient-home",
         doctor: "/doctor-home",
-        clinic_admin: "/clinic-dashboard",
+        clinic_admin: "/clinic/dashboard",   // ✅ 正確路徑
         admin: "/admin-home",
       };
       return roleMap[role] || "/patient-home";
     }
-    return true; // 允許訪問
+    return true;
   }
 
-  // 2️⃣ 需要登入的頁面
+  // 需要登入的頁面
   if (!token) {
     return "/";
   }
 
-  // 3️⃣ 檢查角色權限
+  // 檢查角色權限
   const requiredRole = to.meta.requiredRole as string | undefined;
   if (requiredRole && role !== requiredRole) {
     return "/";
   }
 
-  // 4️⃣ 檢查病人是否需補齊資料
+  // 檢查病人是否需補齊資料
   if (role === "patient" && to.path !== "/patient/profile") {
     const skipProfileCheck = to.meta.skipProfileCheck === true;
     if (!skipProfileCheck) {
@@ -99,7 +110,7 @@ router.beforeEach((to, from) => {
     }
   }
 
-  return true; // 允許訪問
+  return true;
 });
 
 export default router;

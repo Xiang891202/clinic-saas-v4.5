@@ -1,6 +1,6 @@
 <template>
   <div style="padding: 20px; font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto;">
-    <!-- ===== 標題列 ===== -->
+    <!-- 標題列 -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
       <div style="display: flex; align-items: center; gap: 16px;">
         <h2>🕐 時段管理</h2>
@@ -11,14 +11,14 @@
       <button @click="logout" style="padding: 8px 16px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">登出</button>
     </div>
 
-    <!-- ===== 導航列 ===== -->
+    <!-- 導航列 -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
       <button @click="prevPeriod" style="padding: 6px 16px; background: #e0e0e0; border: none; border-radius: 4px; cursor: pointer;">◀</button>
       <span style="font-size: 20px; font-weight: bold;">{{ displayTitle }}</span>
       <button @click="nextPeriod" style="padding: 6px 16px; background: #e0e0e0; border: none; border-radius: 4px; cursor: pointer;">▶</button>
     </div>
 
-    <!-- ===== 日曆本體 ===== -->
+    <!-- 月曆 -->
     <div v-if="viewMode === 'month'">
       <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
         <thead>
@@ -49,7 +49,7 @@
       </table>
     </div>
 
-    <!-- ===== 年曆模式 ===== -->
+    <!-- 年曆 -->
     <div v-else style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
       <div v-for="month in yearData" :key="month.month"
            style="background: white; border-radius: 8px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); cursor: pointer;"
@@ -65,7 +65,7 @@
       </div>
     </div>
 
-    <!-- ===== 點擊日期後展開的時段詳情 ===== -->
+    <!-- 點擊日期後展開的時段詳情 -->
     <div v-if="selectedDate" style="margin-top: 24px; background: #f9f9f9; border-radius: 8px; padding: 16px; border: 1px solid #ddd;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <h3 style="margin: 0;">📅 {{ selectedDate }} 的時段</h3>
@@ -127,8 +127,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
+import { apiFetch } from "../../api/index";
 
 const router = useRouter();
 const loading = ref(false);
@@ -136,13 +137,11 @@ const viewMode = ref<'month' | 'year'>('month');
 const currentDate = ref(new Date());
 const selectedDate = ref<string | null>(null);
 
-// 資料
 const slots = ref<any[]>([]);
 const doctors = ref<any[]>([]);
 const services = ref<any[]>([]);
 const selectedDateSlots = ref<any[]>([]);
 
-// 新增時段表單
 const newSlot = ref({
   doctor_id: "",
   service_id: "",
@@ -163,7 +162,6 @@ const displayTitle = computed(() => {
   return `${y}年`;
 });
 
-// ========== 切換視圖 ==========
 const toggleView = () => {
   viewMode.value = viewMode.value === 'month' ? 'year' : 'month';
 };
@@ -192,27 +190,22 @@ const switchToMonth = (monthIndex: number) => {
   loadSlots();
 };
 
-// ========== 載入資料 ==========
 const loadSlots = async () => {
   const tenantId = localStorage.getItem("clinic_tenant_id");
-  if (!tenantId) return router.push("/clinic/login");
+  if (!tenantId) {
+    console.warn("⚠️ 缺少 tenant-id，跳转登录");
+    router.push("/clinic/login");
+    return;
+  }
 
   loading.value = true;
   try {
     const year = currentDate.value.getFullYear();
     const month = currentDate.value.getMonth();
-    const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
-    const lastDay = new Date(year, month + 1, 0).getDate();
-    const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-
-    // 取得該月所有時段
-    const res = await fetch(`/api/clinic/slots?month=${month + 1}&year=${year}`, {
-      headers: { "x-tenant-id": tenantId },
-    });
+    const res = await apiFetch(`/api/clinic/slots?month=${month + 1}&year=${year}`);
     const data = await res.json();
     if (res.ok) {
       slots.value = data.data || [];
-      // 如果選中的日期在當前月份，更新時段列表
       if (selectedDate.value) {
         selectedDateSlots.value = slots.value.filter(s => s.slot_date === selectedDate.value);
       }
@@ -224,15 +217,14 @@ const loadSlots = async () => {
   }
 };
 
-// 載入醫師和服務（用於下拉選單）
 const loadDoctorsAndServices = async () => {
   const tenantId = localStorage.getItem("clinic_tenant_id");
   if (!tenantId) return;
 
   try {
     const [docRes, svcRes] = await Promise.all([
-      fetch("/api/clinic/doctors", { headers: { "x-tenant-id": tenantId } }),
-      fetch("/api/clinic/services", { headers: { "x-tenant-id": tenantId } }),
+      apiFetch("/api/clinic/doctors"),
+      apiFetch("/api/clinic/services"),
     ]);
     const docData = await docRes.json();
     const svcData = await svcRes.json();
@@ -250,7 +242,6 @@ const calendarData = computed(() => {
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  // 建立日期 → 時段映射
   const slotMap = new Map<string, any[]>();
   slots.value.forEach(s => {
     const key = s.slot_date;
@@ -258,7 +249,6 @@ const calendarData = computed(() => {
     slotMap.get(key)!.push(s);
   });
 
-  // 排序時段（按時間）
   for (const [key, arr] of slotMap) {
     arr.sort((a, b) => a.start_time.localeCompare(b.start_time));
   }
@@ -266,7 +256,6 @@ const calendarData = computed(() => {
   const weeks: any[][] = [];
   let currentWeek: any[] = [];
 
-  // 補空白
   for (let i = 0; i < firstDay; i++) {
     currentWeek.push({ day: "", date: null, isCurrentMonth: false, slots: [] });
   }
@@ -311,7 +300,6 @@ const yearData = computed(() => {
     const days = [];
     const slotMap = new Map<string, any[]>();
 
-    // 該月時段
     const monthSlots = slots.value.filter(s => {
       const d = new Date(s.slot_date);
       return d.getFullYear() === year && d.getMonth() === m;
@@ -349,6 +337,7 @@ const selectDate = (date: string | null) => {
   selectedDateSlots.value = slots.value.filter(s => s.slot_date === date);
 };
 
+// ========== 取得日期樣式 ==========
 const getDayStyle = (day: any) => {
   const style: any = {};
   if (day.isToday) {
@@ -371,13 +360,8 @@ const addSlot = async () => {
     return;
   }
 
-  const tenantId = localStorage.getItem("clinic_tenant_id");
-  const res = await fetch("/api/clinic/slots/date", {
+  const res = await apiFetch("/api/clinic/slots/date", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-tenant-id": tenantId!,
-    },
     body: JSON.stringify({
       slot_date: selectedDate.value,
       start_time: newSlot.value.start_time,
@@ -391,7 +375,6 @@ const addSlot = async () => {
   if (res.ok) {
     slots.value.push(data.data);
     selectedDateSlots.value.push(data.data);
-    // 重置表單
     newSlot.value = { doctor_id: "", service_id: "", start_time: "", end_time: "", max_capacity: 1 };
     alert("時段新增成功");
   } else {
@@ -402,10 +385,8 @@ const addSlot = async () => {
 // ========== 刪除時段 ==========
 const deleteSlot = async (id: string) => {
   if (!confirm("確定刪除此時段？若有預約將改為關閉")) return;
-  const tenantId = localStorage.getItem("clinic_tenant_id");
-  const res = await fetch(`/api/clinic/slots/date/${id}`, {
+  const res = await apiFetch(`/api/clinic/slots/date/${id}`, {
     method: "DELETE",
-    headers: { "x-tenant-id": tenantId! },
   });
   const data = await res.json();
   if (res.ok) {
@@ -424,8 +405,22 @@ const logout = () => {
   router.push("/clinic/login");
 };
 
+// ========== 頁面激活刷新 ==========
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') {
+    console.log('🔄 页面激活，重新加载时段数据');
+    loadSlots();
+    loadDoctorsAndServices();
+  }
+};
+
 // ========== 初始化 ==========
 onMounted(async () => {
   await Promise.all([loadSlots(), loadDoctorsAndServices()]);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 </script>

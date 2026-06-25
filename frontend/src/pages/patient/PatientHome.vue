@@ -25,28 +25,27 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useRouter } from "vue-router";
-import { getAuthStorage, logout } from "@clinic/engine-auth";
 
 const router = useRouter();
 const userName = ref("");
-const userRole = ref("");
 
 const checkAuth = () => {
-  const auth = getAuthStorage();
-  if (!auth.token) {
-    router.replace("/");
-    return;
-  }
-  userName.value = auth.name || "使用者";
-  userRole.value = auth.role || "";
+  const name = localStorage.getItem("auth_user_name") || "使用者";
+  userName.value = name;
 };
 
 const handleLogout = () => {
-  logout();
+  // 清除所有認證相關的 localStorage
+  localStorage.removeItem("auth_token");
+  localStorage.removeItem("auth_role");
+  localStorage.removeItem("auth_tenant_id");
+  localStorage.removeItem("auth_user_id");
+  localStorage.removeItem("auth_user_name");
+  // 清除診所相關（向後相容）
+  localStorage.removeItem("clinic_token");
+  localStorage.removeItem("clinic_tenant_id");
   router.push("/");
 };
 
-onMounted(() => {
-  checkAuth();
-});
+onMounted(checkAuth);
 </script>
