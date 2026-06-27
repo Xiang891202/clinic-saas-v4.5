@@ -1,6 +1,6 @@
-// backend/src/services/notificationService.ts
-import { notificationQueue } from "../../../apps/worker/src/index.js";
-import { supabase } from "../index.js";
+import { Queue, QueueOptions } from 'bullmq'; // ✅ 引入 QueueOptions
+import { SupabaseClient } from '@supabase/supabase-js';
+import { notificationQueue } from '../config/queues.js';
 
 export interface NotificationPayload {
   type: "created" | "modified" | "cancelled" | "reminder";
@@ -9,12 +9,17 @@ export interface NotificationPayload {
 }
 
 export class NotificationService {
-  /**
-   * 发送通知并将结果记录到 notification_usage
-   */
+  private supabase: SupabaseClient;
+  
+  // ⚠️ 將第一個參數的型態從 Redis 改為連線配置物件
+  constructor(supabase: SupabaseClient) {
+    this.supabase = supabase;
+  }
+
   async send(payload: NotificationPayload): Promise<void> {
+    const { supabase } = this;
     try {
-      // 1. 先记录到 notification_logs（用于审计）
+      // 记录日志
       const { data: log, error: logErr } = await supabase
         .from("notification_logs")
         .insert({
@@ -29,32 +34,26 @@ export class NotificationService {
 
       if (logErr) {
         console.error("记录通知日志失败:", logErr);
-        // 继续执行，不阻塞
       }
 
-      // 2. 放入队列
+      // 放入队列
       await notificationQueue.add("send-notification", payload);
 
-      // 3. 更新用量计数（在 Worker 实际发送成功/失败后会再次更新）
+      // 更新用量
       await this.updateUsage(payload.tenant_id, "sent", 1);
 
       console.log(`✅ 通知已放入 Queue: ${payload.type} - ${payload.booking_id}`);
     } catch (error) {
       console.error(`❌ 通知放入 Queue 失败: ${payload.type} - ${payload.booking_id}`, error);
-      // 记录失败
       await this.updateUsage(payload.tenant_id, "failed", 1);
     }
   }
 
-  /**
-   * 更新通知用量统计
-   */
   async updateUsage(tenantId: string, type: "sent" | "failed", count: number = 1) {
     const now = new Date();
     const yearMonth = now.toISOString().slice(0, 7);
 
-    // 先查询当前记录
-    const { data: existing } = await supabase
+    const { data: existing } = await this.supabase
       .from("notification_usage")
       .select("sent_count, failed_count")
       .eq("tenant_id", tenantId)
@@ -65,7 +64,7 @@ export class NotificationService {
     const newSent = (existing?.sent_count || 0) + (type === "sent" ? count : 0);
     const newFailed = (existing?.failed_count || 0) + (type === "failed" ? count : 0);
 
-    const { error } = await supabase
+    const { error } = await this.supabase
       .from("notification_usage")
       .upsert(
         {
@@ -77,7 +76,7 @@ export class NotificationService {
           updated_at: new Date().toISOString(),
         },
         {
-          onConflict: "tenant_id, year_month, channel",  // ✅ 关键！
+          onConflict: "tenant_id, year_month, channel",
         }
       );
 
@@ -86,14 +85,11 @@ export class NotificationService {
     }
   }
 
-  /**
-   * 获取租户本月用量
-   */
   async getUsage(tenantId: string) {
     const now = new Date();
     const yearMonth = now.toISOString().slice(0, 7);
 
-    const { data, error } = await supabase
+    const { data, error } = await this.supabase
       .from("notification_usage")
       .select("*")
       .eq("tenant_id", tenantId)

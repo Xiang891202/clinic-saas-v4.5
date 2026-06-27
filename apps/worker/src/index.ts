@@ -1,16 +1,35 @@
+// apps/worker/src/index.ts
 import { Worker, Queue } from "bullmq";
 import Redis from "ioredis";
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import path from "path";
-import ical from 'ical-generator';
+import ical from "ical-generator";
+
+// ========== 导入 Policy Engine ==========
+import { PolicyEngine, ActionExecutor } from "../../../packages/engine-policy/src/index.ts";
+
+// ========== 导入冪等性守衛 ==========
+import { IdempotencyGuard } from '../../../packages/shared/src/idempotency/index.ts';
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
-const redis = new Redis(process.env.REDIS_URL!, {
+// 1. 解析環境變數中的 Upstash URL 物件
+const url = new URL(process.env.REDIS_URL!);
+
+// 2. 建立給 BullMQ 專用的配置物件（強制帶有 TLS）
+const bullmqConnectionConfig = {
+  host: url.hostname,
+  port: parseInt(url.port) || 6379,
+  username: url.username,
+  password: url.password,
+  tls: {}, // 👈 最關鍵：Upstash 強制要求 TLS 加密連線
   maxRetriesPerRequest: null,
-});
+};
+
+// 3. 建立給主程式（如 Policy Engine）共用的獨立實例
+const redis = new Redis(bullmqConnectionConfig);
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -27,93 +46,104 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-export const notificationQueue = new Queue("notification.queue", {
-  connection: redis,
+// ========== 初始化 Policy Engine ==========
+const policyEngine = new PolicyEngine();
+const executor = new ActionExecutor({
+  redis,
+  supabase,
+  sendEmail: async (to: string, subject: string, body: string) => {
+    await transporter.sendMail({
+      from: process.env.SMTP_USER,
+      to,
+      subject,
+      text: body,
+    });
+  },
+  log: (level: string, message: string, metadata?: any) => {
+    const logMethod = level === "error" ? console.error : console.log;
+    logMethod(`[Policy] ${message}`, metadata || "");
+  },
 });
 
-// ========== 通知用量記錄 ==========
-// apps/worker/src/index.ts
+// 4. ✅ 修正 Queue 的初始化：改為傳入配置物件，不傳入實例
+export const notificationQueue = new Queue("notification.queue", {
+  connection: bullmqConnectionConfig,
+});
 
+// ========== 通知用量记录 ==========
 async function recordUsage(tenantId: string, channel: string, status: "sent" | "failed") {
   const yearMonth = new Date().toISOString().slice(0, 7);
-
-  // 先查询当前记录
-  const { data: existing } = await supabase
-    .from("notification_usage")
-    .select("sent_count, failed_count")
-    .eq("tenant_id", tenantId)
-    .eq("year_month", yearMonth)
-    .eq("channel", channel)
-    .maybeSingle();
-
-  const newSent = (existing?.sent_count || 0) + (status === "sent" ? 1 : 0);
-  const newFailed = (existing?.failed_count || 0) + (status === "failed" ? 1 : 0);
-
+  const field = status === "sent" ? "sent_count" : "failed_count";
   const { error } = await supabase
     .from("notification_usage")
-    .upsert(
-      {
-        tenant_id: tenantId,
-        year_month: yearMonth,
-        channel: channel,
-        sent_count: newSent,
-        failed_count: newFailed,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        onConflict: "tenant_id, year_month, channel",
-      }
-    );
+    .upsert({
+      tenant_id: tenantId,
+      year_month: yearMonth,
+      channel,
+      [field]: 1,
+      updated_at: new Date().toISOString(),
+    });
+  if (error) console.error("❌ 記錄通知用量失敗:", error);
+}
 
-  if (error) {
-    console.error("❌ 記錄通知用量失敗:", error);
+// ========== 触发 Policy 事件 ==========
+async function triggerPolicyEvent(
+  type: string,
+  context: Record<string, any>,
+  tenantId?: string
+): Promise<void> {
+  try {
+    const event = {
+      type,
+      timestamp: new Date(),
+      tenantId,
+      context,
+    };
+
+    const plan = policyEngine.evaluate(event);
+    await executor.execute(plan);
+  } catch (error) {
+    console.error("❌ Policy 事件触发失败:", error);
   }
 }
 
-// ========== ✅ 產生 .ics 行事曆內容（支援新增/修改/取消） ==========
-function generateICS(booking: any, type: 'created' | 'modified' | 'cancelled'): string {
+// ========== 生成 .ics 行事曆 ==========
+function generateICS(booking: any, type: "created" | "modified" | "cancelled"): string {
   const slot = booking.slot_instances;
   const startTime = new Date(`${slot.slot_date}T${slot.start_time}`);
   const endTime = new Date(`${slot.slot_date}T${slot.end_time}`);
-  
-  // ✅ 使用預約 ID 作為 UID（永遠不變）
   const uid = `booking-${booking.id}@clinic-saas.com`;
-  
-  // ✅ SEQUENCE：每次修改時遞增（用 updated_at 時間戳作為版本）
-  const sequence = type === 'modified' 
+  const sequence = type === "modified" 
     ? Math.floor(new Date(booking.updated_at).getTime() / 1000) 
     : 0;
 
-  // ✅ 根據類型決定 METHOD
-  let method: 'REQUEST' | 'CANCEL' = 'REQUEST';
-  let status: 'CONFIRMED' | 'CANCELLED' = 'CONFIRMED';
-  let summary = `診所預約 - ${booking.services?.name || '看診'}`;
-  let description = `醫師：${booking.doctors?.name || '未知醫師'}\n服務：${booking.services?.name || '未知服務'}`;
-  let location = '診所地址';
+  let method: "REQUEST" | "CANCEL" = "REQUEST";
+  let status: "CONFIRMED" | "CANCELLED" = "CONFIRMED";
+  let summary = `診所預約 - ${booking.services?.name || "看診"}`;
+  let description = `醫師：${booking.doctors?.name || "未知醫師"}\n服務：${booking.services?.name || "未知服務"}`;
+  let location = "診所地址";
   let alarms: { trigger: number; action: string; description: string }[] = [];
 
-  if (type === 'cancelled') {
-    method = 'CANCEL';
-    status = 'CANCELLED';
-    summary = '❌ 預約已取消';
-    description = '此預約已被取消，請從行事曆中移除。';
-    location = '';
-    // 取消時不發送提醒
+  if (type === "cancelled") {
+    method = "CANCEL";
+    status = "CANCELLED";
+    summary = "❌ 預約已取消";
+    description = "此預約已被取消，請從行事曆中移除。";
+    location = "";
   } else {
-    // 新增或修改時，加入 30 分鐘提醒
-    alarms = [{ trigger: 30 * 60, action: 'DISPLAY', description: '預約時間快到了！' }];
+    alarms = [{ trigger: 30 * 60, action: "DISPLAY", description: "預約時間快到了！" }];
   }
 
   const calendar = ical({
-    name: '診所預約系統',
-    timezone: 'Asia/Taipei',
-    method: method,  // ✅ 關鍵！
-    prodId: { company: 'Clinic SaaS', product: 'Appointment' },
+    name: "診所預約系統",
+    timezone: "Asia/Taipei",
+    method: method,
+    prodId: { company: "Clinic SaaS", product: "Appointment" },
   });
 
   calendar.createEvent({
-    uid: uid,                    // ✅ 唯一識別碼
-    sequence: sequence,          // ✅ 版本號
+    uid: uid,
+    sequence: sequence,
     start: startTime,
     end: endTime,
     summary: summary,
@@ -122,19 +152,31 @@ function generateICS(booking: any, type: 'created' | 'modified' | 'cancelled'): 
     status: status,
     alarms: alarms,
     organizer: {
-      name: '診所預約系統',
+      name: "診所預約系統",
       email: process.env.SMTP_USER,
     },
-    ...(type === 'cancelled' ? { 
-      'X-METHOD': 'CANCEL', 
-      'X-CANCELLED': 'TRUE' 
-    } : {}),
+    ...(type === "cancelled" ? { "X-METHOD": "CANCEL", "X-CANCELLED": "TRUE" } : {}),
   });
 
   return calendar.toString();
 }
 
-// ========== Worker 主要邏輯 ==========
+// ========== 日志记录 ==========
+async function logNotification(
+  booking_id: string,
+  channel: string,
+  status: string,
+  detail?: any
+) {
+  await supabase.from("notification_logs").insert({
+    booking_event_id: booking_id,
+    channel,
+    status,
+    detail: detail || {},
+  });
+}
+
+// ========== Worker 主逻辑 ==========
 async function startWorker() {
   let lineClient: any = null;
 
@@ -148,9 +190,10 @@ async function startWorker() {
     } catch (err) {
       console.warn("⚠️ LINE 初始化失敗，僅使用 Email 通知", err);
     }
-  } else {
-    console.warn("⚠️ 未設定 LINE Token，僅使用 Email 通知");
   }
+
+  // ✅ 初始化冪等性守衛（Worker 外部，避免每次 job 重新建立）
+  const idempotencyGuard = new IdempotencyGuard(redis, supabase);
 
   const worker = new Worker(
     "notification.queue",
@@ -160,6 +203,18 @@ async function startWorker() {
 
       if (booking_id === "test-uuid-placeholder") {
         console.log("🧪 收到測試任務預覽，跳過");
+        return;
+      }
+
+      // ========== ✅ 新增：冪等性檢查 ==========
+      const idempotencyKey = `notification:${booking_id}:${type}`;
+      const { exists } = await idempotencyGuard.check(
+        idempotencyKey,
+        'notification_logs',
+        'idempotency_key'
+      );
+      if (exists) {
+        console.log(`⏭️ 通知 ${idempotencyKey} 已處理，跳過重複執行`);
         return;
       }
 
@@ -181,7 +236,6 @@ async function startWorker() {
       }
 
       const patient = booking.patients;
-      const slot = booking.slot_instances;
       const targetTenantId = tenant_id || booking.tenant_id;
 
       const statusMap = {
@@ -197,8 +251,8 @@ async function startWorker() {
 您的預約已${subject}：
 - 服務：${booking.services?.name || "未知服務"}
 - 醫師：${booking.doctors?.name || "未知醫師"}
-- 日期：${slot?.slot_date}
-- 時間：${slot?.start_time} - ${slot?.end_time}
+- 日期：${booking.slot_instances?.slot_date}
+- 時間：${booking.slot_instances?.start_time} - ${booking.slot_instances?.end_time}
 
 如需修改或取消，請登入系統操作。
 
@@ -206,42 +260,69 @@ async function startWorker() {
       `;
 
       let emailSent = false;
+      let emailRetryCount = 0;
+      const maxRetries = 3;
 
-      // ===== 發送 Email（含 .ics） =====
+      // ===== 發送 Email（含 .ics，帶重試） =====
       if (patient.telecom_email) {
-        try {
-          // ✅ 使用新的 generateICS 函數，傳入 type 參數
-          const icsContent = generateICS(booking, type);
+        while (emailRetryCount < maxRetries) {
+          try {
+            const icsContent = generateICS(booking, type);
+            let filename = "預約提醒.ics";
+            if (type === "cancelled") filename = "預約取消.ics";
+            else if (type === "modified") filename = "預約更新.ics";
 
-          // ✅ 根據類型決定檔案名稱
-          let filename = '預約提醒.ics';
-          if (type === 'cancelled') filename = '預約取消.ics';
-          else if (type === 'modified') filename = '預約更新.ics';
+            await transporter.sendMail({
+              from: process.env.SMTP_USER,
+              to: patient.telecom_email,
+              subject: `[診所系統] ${subject}`,
+              text: text,
+              attachments: [
+                {
+                  filename: filename,
+                  content: icsContent,
+                  contentType: "text/calendar; charset=utf-8; method=" + (type === "cancelled" ? "CANCEL" : "REQUEST"),
+                  contentDisposition: "inline",
+                },
+              ],
+            });
+            console.log(`📧 Email（含 .ics）已發送至 ${patient.telecom_email}`);
+            await logNotification(booking_id, "email", "sent");
+            await recordUsage(targetTenantId, "email", "sent");
+            emailSent = true;
 
-          await transporter.sendMail({
-            from: process.env.SMTP_USER,
-            to: patient.telecom_email,
-            subject: `[診所系統] ${subject}`,
-            text: text,
-            attachments: [
-              {
-                filename: filename,
-                content: icsContent,
-                contentType: 'text/calendar; charset=utf-8; method=' + (type === 'cancelled' ? 'CANCEL' : 'REQUEST'),
-                contentDisposition: 'inline',
-              },
-            ],
-          });
-          console.log(`📧 Email（含 .ics）已發送至 ${patient.telecom_email}`);
-          await logNotification(booking_id, 'email', 'sent');
-          await recordUsage(targetTenantId, 'email', 'sent');
-          await recordUsage(targetTenantId, 'email', 'sent');  // ✅ 成功时记录
-          emailSent = true;
-        } catch (err) {
-          console.error(`❌ Email 發送失敗:`, err);
-          await logNotification(booking_id, 'email', 'failed', { error: String(err) });
-          await recordUsage(targetTenantId, 'email', 'failed');
-          await recordUsage(targetTenantId, 'email', 'failed');  // ✅ 失败时也记录
+            // ✅ 記錄 Email 冪等性
+            await idempotencyGuard.record(
+              idempotencyKey,
+              { status: 'sent', channel: 'email', booking_id },
+              'notification_logs',
+              'idempotency_key'
+            );
+            break; // 发送成功，跳出重试循环
+          } catch (err: any) {
+            emailRetryCount++;
+            console.error(`❌ Email 發送失敗 (嘗試 ${emailRetryCount}/${maxRetries}):`, err.message);
+            
+            if (emailRetryCount >= maxRetries) {
+              await logNotification(booking_id, "email", "failed", { error: err.message, retryCount: emailRetryCount });
+              await recordUsage(targetTenantId, "email", "failed");
+              
+              // ✅ 触发 Policy 事件：通知失败
+              await triggerPolicyEvent(
+                "NOTIFICATION_FAILURE",
+                {
+                  channel: "email",
+                  bookingId: booking_id,
+                  error: err.message,
+                  retryCount: emailRetryCount,
+                },
+                targetTenantId
+              );
+            } else {
+              // 等待后重试
+              await new Promise(resolve => setTimeout(resolve, 1000 * emailRetryCount));
+            }
+          }
         }
       }
 
@@ -255,10 +336,30 @@ async function startWorker() {
           console.log(`💬 LINE 已發送至 ${patient.line_user_id}`);
           await logNotification(booking_id, "line", "sent");
           await recordUsage(targetTenantId, "line", "sent");
-        } catch (err) {
+
+          // ✅ 記錄 LINE 冪等性（使用不同的 key，避免與 Email 衝突）
+          await idempotencyGuard.record(
+            `notification:${booking_id}:line`,
+            { status: 'sent', channel: 'line', booking_id },
+            'notification_logs',
+            'idempotency_key'
+          );
+        } catch (err: any) {
           console.error(`❌ LINE 發送失敗:`, err);
-          await logNotification(booking_id, "line", "failed", { error: String(err) });
+          await logNotification(booking_id, "line", "failed", { error: err.message });
           await recordUsage(targetTenantId, "line", "failed");
+          
+          // ✅ 触发 Policy 事件：LINE 通知失败
+          await triggerPolicyEvent(
+            "NOTIFICATION_FAILURE",
+            {
+              channel: "line",
+              bookingId: booking_id,
+              error: err.message,
+              retryCount: 1,
+            },
+            targetTenantId
+          );
         }
       }
 
@@ -272,28 +373,31 @@ async function startWorker() {
     }
   );
 
-  async function logNotification(booking_id: string, channel: string, status: string, detail?: any) {
-    await supabase.from("notification_logs").insert({
-      booking_event_id: booking_id,
-      channel,
-      status,
-      detail: detail || {},
-    });
-  }
+  // ========== Worker 事件监听 ==========
+  worker.on("completed", (job) => {
+    console.log(`✅ 任务完成: ${job.id}`);
+  });
+
+  worker.on("failed", async (job, err) => {
+    console.error(`❌ 任务失败: ${job?.id}`, err.message);
+    
+    // ✅ 触发 Policy 事件：Worker 任务失败
+    if (job) {
+      await triggerPolicyEvent(
+        "WORKER_JOB_FAILED",
+        {
+          jobId: job.id,
+          queueName: job.queueName,
+          data: job.data,
+          error: err.message,
+        },
+        job.data?.tenant_id
+      );
+    }
+  });
 
   console.log("🚀 Worker 已啟動，監聽 notification.queue");
-
-  setTimeout(async () => {
-    try {
-      await notificationQueue.add("test", {
-        type: "test",
-        booking_id: "test-uuid-placeholder",
-      });
-      console.log("🧪 已加入測試任務到 notification.queue");
-    } catch (err) {
-      console.error("❌ 測試任務失敗:", err);
-    }
-  }, 2000);
+  console.log("✅ Policy Engine 已集成到 Worker");
 }
 
 startWorker().catch((err) => {

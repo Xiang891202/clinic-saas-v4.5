@@ -11,8 +11,13 @@
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "./src"
+    // ✅ 移除 rootDir，讓 TypeScript 自動推斷為 packages/
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts", "node_modules"]
+  "include": [
+    "src/**/*.ts",
+    "../shared/src/**/*.ts"   // ✅ 包含 shared 原始碼
+  ],
+  "exclude": ["src/**/*.test.ts", "node_modules"]
 }

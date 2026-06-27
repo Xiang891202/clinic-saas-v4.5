@@ -1,16 +1,25 @@
 // backend/src/config/env.ts
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 
-dotenv.config();
+// 如果使用 ES Module，需获取 __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// ========== 環境變數驗證 ==========
-const requiredEnv = [
-  "SUPABASE_URL",
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "REDIS_URL",
-  "JWT_SECRET",
-];
+// 项目根目录（假设 env.ts 在 backend/src/config/ 下）
+const rootDir = path.resolve(__dirname, "../../../");
+const envPath = path.join(rootDir, ".env");
 
+dotenv.config({ path: envPath });
+
+// 可选：若仍未加载，尝试默认（兼容）
+if (!process.env.REDIS_URL) {
+  dotenv.config();
+}
+
+// 验证必需变量
+const requiredEnv = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "REDIS_URL", "JWT_SECRET"];
 for (const key of requiredEnv) {
   if (!process.env[key]) {
     console.error(`❌ 缺少環境變數: ${key}`);
@@ -18,7 +27,6 @@ for (const key of requiredEnv) {
   }
 }
 
-// ========== 導出環境變數 ==========
 export const env = {
   supabaseUrl: process.env.SUPABASE_URL!,
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY!,

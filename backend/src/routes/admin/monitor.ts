@@ -3,9 +3,11 @@ import { FastifyInstance } from "fastify";
 import { safeHandler } from "../../utils/controller-wrapper";
 import { success } from "../../utils/response";
 import { AdminMonitorService } from "../../services/adminMonitor";
+import { redisConfig } from '../../config/redis.js';
+import { createQueue } from '../../config/queues.js';
 
 export async function adminMonitorRoutes(fastify: FastifyInstance) {
-  const monitorService = new AdminMonitorService(fastify.supabase);
+  const monitorService = new AdminMonitorService((fastify as any).supabase);
 
   // ========== 获取通知统计（指定租户，可选） ==========
   fastify.get(
@@ -81,7 +83,7 @@ export async function adminMonitorRoutes(fastify: FastifyInstance) {
 
       // 1. 检查数据库
       try {
-        const { error } = await fastify.supabase.from("tenants").select("id").limit(1);
+        const { error } = await (fastify as any).supabase.from("tenants").select("id").limit(1);
         checks.database = !error;
       } catch {
         checks.database = false;
@@ -103,7 +105,7 @@ export async function adminMonitorRoutes(fastify: FastifyInstance) {
         const { Queue } = await import("bullmq");
         const redis = (fastify as any).redis;
         if (redis) {
-          const testQueue = new Queue("test-check", { connection: redis });
+          const testQueue = createQueue("test-check");
           await testQueue.add("check", { timestamp: Date.now() });
           await testQueue.close();
           checks.queue = true;

@@ -1,6 +1,6 @@
 ﻿import { SupabaseClient } from "@supabase/supabase-js";
 import { Redis } from "ioredis";
-import { RedisLock } from "../../shared/src/redis-lock";
+import { RedisLock } from "../../shared/src/redis-lock.js";
 import {
   IBookingEngine,
   SlotFilters,
@@ -11,6 +11,17 @@ import {
   RecentBooking,
   ModifyAppointmentDTO,  // ✅ 新增
 } from "./types.js";
+
+interface BookingWithSlot {
+  slot_instances: {
+    id: string;
+    slot_date: string;
+    start_time: string;
+    end_time: string;
+    booked_count: number;
+    version: number;
+  } | null;
+}
 
 export class BookingEngine implements IBookingEngine {
   private lock: RedisLock;
@@ -44,7 +55,7 @@ export class BookingEngine implements IBookingEngine {
     if (filters.doctor_id) query = query.eq("doctor_id", filters.doctor_id);
     if (filters.location_id) query = query.eq("location_id", filters.location_id);
 
-    const { data: slots, error } = await query;
+    const { data: slots, error } = await query as { data: SlotInstance[] | null; error: any };
     if (error) throw new Error(`Failed to fetch slots: ${error.message}`);
     if (!slots || slots.length === 0) return [];
 
@@ -84,10 +95,11 @@ export class BookingEngine implements IBookingEngine {
       slot_date: slot.slot_date,
       start_time: slot.start_time,
       end_time: slot.end_time,
-      doctor_name: slot.doctors?.name || "未知醫師",
-      doctor_id: slot.doctors?.id || "",
-      service_name: slot.services?.name || "未知服務",
-      service_id: slot.services?.id || "",
+      // ✅ 改成 `?.[0]?.` 的形式获取数组里的第一项
+      doctor_name: slot.doctors?.[0]?.name || "未知醫師", 
+      doctor_id: slot.doctors?.[0]?.id || "",
+      service_name: slot.services?.[0]?.name || "未知服務",
+      service_id: slot.services?.[0]?.id || "",
       max_capacity: slot.max_capacity,
       booked_count: slot.booked_count,
     }));
@@ -102,11 +114,11 @@ export class BookingEngine implements IBookingEngine {
   ): Promise<SlotInstance[]> {
     const cooldownMap = new Map<string, number>();
     slots.forEach((slot) => {
-      const svc = slot.services;
-      if (svc && svc.id) {
-        cooldownMap.set(svc.id, svc.strict_cooldown_days || 0);
-      }
-    });
+    const svc = slot.services?.[0];   // ✅ 取陣列中的第一個元素
+    if (svc?.id) {
+      cooldownMap.set(svc.id, svc.strict_cooldown_days || 0);
+    }
+  });
 
     const maxCooldown = Math.max(...Array.from(cooldownMap.values()), 0);
     if (maxCooldown === 0) return slots;
@@ -130,8 +142,8 @@ export class BookingEngine implements IBookingEngine {
     );
 
     return slots.filter((slot) => {
-      const svc = slot.services;
-      if (!svc || !svc.id) return true;
+      const svc = slot.services?.[0];
+      if (!svc?.id) return true;
       const cd = cooldownMap.get(svc.id) || 0;
       return !(cd > 0 && cooldownServiceIds.has(svc.id));
     });
@@ -484,5 +496,20 @@ export class BookingEngine implements IBookingEngine {
 
     // 6. 觸發取消通知（Worker）
     console.log(`📧 [Phase 1] 預約 ${appointmentId} 已取消，待串接通知系統`);
+  }
+
+  async getAppointmentById(tenantId: string, appointmentId: string): Promise<AppointmentResponse | null> {
+    const { data, error } = await this.supabase
+      .from("booking_events")
+      .select("*")
+      .eq("id", appointmentId)
+      .eq("tenant_id", tenantId)
+      .single();
+
+    if (error) {
+      if (error.code === "PGRST116") return null; // 找不到记录
+      throw new Error(`查詢預約失敗: ${error.message}`);
+    }
+    return data as AppointmentResponse;
   }
 }

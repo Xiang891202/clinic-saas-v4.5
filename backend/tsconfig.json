@@ -1,19 +1,21 @@
 ﻿{
   "compilerOptions": {
     "target": "ES2022",
-    "module": "CommonJS",
-    "moduleResolution": "node10",     // 或者 "node" 但加上 ignoreDeprecations
-    "ignoreDeprecations": "6.0",      // 忽略 TS 6.0 弃用警告
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": "./src",                    // ✅ 保持為 backend/src
     "types": ["jest", "node"],
     "paths": {
-      "@clinic/*": ["../packages/*/src"]
-    }
+      "@clinic/*": ["../packages/*/src"],
+      "@engine-booking/*": ["../../packages/engine-booking/src/*"]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true                         // 只檢查型別，不輸出
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts"],              // ✅ 僅包含 backend/src
   "exclude": ["node_modules"]
 }
