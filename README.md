@@ -1,4 +1,4 @@
-﻿# 🏥 SaaS 診所預約系統 (v4.6) — 開發啟動指南
+﻿# 🏥 SaaS 診所預約系統 (v4.6 Phase 2) — 開發啟動指南
 
 本文件記錄專案開發環境的完整啟動流程，包含資料庫、後端 API、Worker、Cron、前端 UI 與 ngrok 的啟動指令。
 
@@ -81,7 +81,10 @@ npm exec tsx watch src/index.ts
 啟動成功後，會顯示：
 
 text
-🚀 後端伺服器 (v4.6 Phase 1) 已啟動 -> http://localhost:3000
+🚀 後端伺服器 (v4.6 Phase 2) 已啟動 -> http://localhost:3000
+📌 Policy Engine API: http://localhost:3000/api/admin/policy/evaluate
+📌 降级状态: http://localhost:3000/api/admin/policy/degraded-services
+📌 告警历史: http://localhost:3000/api/admin/policy/alerts
 📌 測試時段查詢: http://localhost:3000/api/booking/slots?date=2026-07-01
 📌 建立預約: POST http://localhost:3000/api/booking/appointments
 4.2 Worker (BullMQ 通知處理)
@@ -92,6 +95,7 @@ npm exec tsx watch src/index.ts
 
 text
 🚀 Worker 已啟動，監聽 notification.queue
+✅ Policy Engine 已集成到 Worker
 4.3 Cron (排程任務)
 bash
 cd apps/cron
@@ -143,7 +147,7 @@ json
 {
   "status": "healthy",
   "checks": { "database": true, "redis": true },
-  "version": "4.6 (Phase 1)"
+  "version": "4.6 (Phase 2)"
 }
 6.2 測試前端
 打開瀏覽器，拜訪 http://localhost:5174/，應顯示診所預約系統首頁。
@@ -176,13 +180,16 @@ clinic-saas-v4.5/
 │   └── cron/               # 排程任務
 ├── packages/
 │   ├── engine-booking/     # 預約引擎
-│   ├── engine-auth/        # 認證引擎
-│   └── shared/             # 共用工具
+│   ├── engine-policy/      # 🆕 決策引擎（自動降級、告警）
+│   ├── engine-auth/        # 認證引擎（待實作）
+│   └── shared/             # 共用工具（安全、金流、冪等性）
 ├── frontend/               # Vue 3 + Vite
 ├── backend/                # Fastify API (root)
 ├── supabase/
 │   └── migrations/         # 資料庫 Schema
 └── docker-compose.yml      # 本地 Redis
+🆕 Phase 2 新增模組：engine-policy 作為唯一決策中心，負責處理通知失敗、佇列擁擠、登入異常等自動化場景，並統一輸出 ActionPlan 供 Executor 執行。
+
 🛠️ 常見問題
 ❌ pnpm: command not found
 請安裝 pnpm：
@@ -209,11 +216,27 @@ npx tsx watch src/index.ts
 請下載並安裝 ngrok：https://ngrok.com/download
 
 📌 下一步
-Phase 1 完成後，下一階段為 Phase 2：信任與變現強化。
+Phase 2 已正式啟動，目前已完成：
+
+✅ 安全模組（帳號鎖定、IP 限流）
+
+✅ 金流抽象介面（Stripe、ECPay、銀行轉帳）
+
+✅ 冪等性與排程去重
+
+✅ Policy Engine 基礎架構
+
+下一階段為 Phase 2 批次 B，包含：
+
+Policy Engine 新規則（登入異常、診所登入告警）
+
+Billing Engine 訂金功能
+
+排程協調器（scheduler.queue）
 
 更多細節請參閱 docs/ 資料夾中的開發規劃書。
 
-最後更新時間：2026 年 6 月
+最後更新時間：2026 年 6 月 27 日
 
 text
 
