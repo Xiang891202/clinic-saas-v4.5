@@ -2,15 +2,16 @@
   "compilerOptions": {
     "target": "ESNext",
     "useDefineForClassFields": true,
-    "module": "Node16",
-    "moduleResolution": "Node16",
+    "module": "ESNext",                    // ✅ 改為 ESNext
+    "moduleResolution": "bundler",         // ✅ 改為 bundler
     "strict": true,
     "jsx": "preserve",
     "sourceMap": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "lib": ["ESNext", "DOM"],
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["vite/client"]               // ✅ 新增 Vite 類型（含 import.meta.env）
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue"],
   "references": [{ "path": "./tsconfig.node.json" }]

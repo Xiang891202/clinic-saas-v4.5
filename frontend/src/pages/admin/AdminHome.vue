@@ -39,16 +39,28 @@
 
     <!-- 功能選單 -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
-      <router-link to="/admin/tenants" style="padding: 16px 24px; background: #9C27B0; color: white; text-decoration: none; border-radius: 8px; text-align: center; font-weight: bold; transition: opacity 0.2s;" @mouseenter="(e) => e.target.style.opacity = '0.85'" @mouseleave="(e) => e.target.style.opacity = '1'">
+      <router-link
+        to="/admin/tenants"
+        style="padding: 16px 24px; background: #9C27B0; color: white; text-decoration: none; border-radius: 8px; text-align: center; font-weight: bold; transition: opacity 0.2s;"
+        @mouseenter="handleLinkHover"
+        @mouseleave="handleLinkLeave"
+      >
         🏢 診所管理
         <div style="font-size: 12px; font-weight: normal; opacity: 0.8; margin-top: 4px;">管理所有診所</div>
       </router-link>
-      <router-link to="/admin/contracts" style="padding: 16px 24px; background: #FF9800; color: white; text-decoration: none; border-radius: 8px; text-align: center; font-weight: bold; transition: opacity 0.2s;" @mouseenter="(e) => e.target.style.opacity = '0.85'" @mouseleave="(e) => e.target.style.opacity = '1'">
+      <router-link
+        to="/admin/contracts"
+        style="padding: 16px 24px; background: #FF9800; color: white; text-decoration: none; border-radius: 8px; text-align: center; font-weight: bold; transition: opacity 0.2s;"
+        @mouseenter="handleLinkHover"
+        @mouseleave="handleLinkLeave"
+      >
         📄 合約管理
         <div style="font-size: 12px; font-weight: normal; opacity: 0.8; margin-top: 4px;">管理診所合約</div>
       </router-link>
-
-      <router-link to="/admin/monitor" style="padding: 16px 24px; background: #607D8B; color: white; text-decoration: none; border-radius: 8px; text-align: center; font-weight: bold;">
+      <router-link
+        to="/admin/monitor"
+        style="padding: 16px 24px; background: #607D8B; color: white; text-decoration: none; border-radius: 8px; text-align: center; font-weight: bold;"
+      >
         📊 系統監測
         <div style="font-size: 12px; font-weight: normal; opacity: 0.8; margin-top: 4px;">健康狀態與通知統計</div>
       </router-link>
@@ -57,7 +69,6 @@
     <div style="margin-top: 40px; padding: 16px; background: #f5f5f5; border-radius: 8px; font-size: 14px; color: #666;">
       ⚡ 管理端功能 — 診所管理、合約管理
     </div>
-    
   </div>
 </template>
 
@@ -119,6 +130,21 @@ const handleLogout = () => {
   localStorage.removeItem("clinic_token");
   localStorage.removeItem("clinic_tenant_id");
   router.push("/");
+};
+
+// ✅ 修正：安全的事件處理函數
+const handleLinkHover = (e: MouseEvent) => {
+  const target = e.currentTarget as HTMLElement;
+  if (target) {
+    target.style.opacity = '0.85';
+  }
+};
+
+const handleLinkLeave = (e: MouseEvent) => {
+  const target = e.currentTarget as HTMLElement;
+  if (target) {
+    target.style.opacity = '1';
+  }
 };
 
 const handleVisibilityChange = () => {

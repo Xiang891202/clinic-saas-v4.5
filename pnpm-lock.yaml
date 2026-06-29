@@ -143,6 +143,15 @@ importers:
         specifier: workspace:*
         version: link:../shared
 
+  packages/engine-billing:
+    dependencies:
+      '@clinic/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@supabase/supabase-js':
+        specifier: ^2.42.0
+        version: 2.108.2
+
   packages/engine-booking:
     dependencies:
       '@clinic/shared':
