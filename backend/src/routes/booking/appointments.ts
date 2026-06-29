@@ -1,21 +1,24 @@
 import { FastifyInstance } from "fastify";
-import { requireTenant } from "../../middlewares/tenant";
-import { requireAuth } from "../../middlewares/auth";
+// import { requireTenant } from "../../middlewares/tenant";
+import { requireAuth } from "../../middlewares/auth";  // ✅ 改用 requireAuth
 import { safeHandler } from "../../utils/controller-wrapper";
 import { success, error } from "../../utils/response";
 import { NotificationService } from "../../services/notificationService";
 import { isValidUUID } from "../../utils/validate-uuid";
 
-const notificationService = new NotificationService();
+// const notificationService = new NotificationService();
 
 export async function bookingAppointmentRoutes(fastify: FastifyInstance) {
   const bookingEngine = (fastify as any).bookingEngine;
+  const supabase = (fastify as any).supabase;
+  const notificationService = new NotificationService(supabase);  // ✅ 傳入 supabase
 
+  // appointments.ts - POST handler
   // ========== 创建预约 ==========
   fastify.post(
     "/api/booking/appointments",
     {
-      preHandler: [requireTenant],
+      preHandler: [requireAuth],
       schema: {
         body: {
           type: "object",
@@ -32,9 +35,24 @@ export async function bookingAppointmentRoutes(fastify: FastifyInstance) {
       },
     },
     safeHandler(async (req, reply) => {
-      const tenantId = (req as any).tenantId;
-      const result = await bookingEngine.createAppointment(tenantId, req.body as any);
+      const user = (req as any).user;
+      const tenantId = user?.tenantId;
+      if (!tenantId) {
+        return reply.status(401).send(error("未授權"));
+      }
 
+      const body = req.body as any;
+      const patientId = user?.patientId;
+      if (!patientId) {
+        return reply.status(401).send(error("未授權的病人"));
+      }
+      body.patient_id = patientId;
+
+      if (!body.service_id || !body.doctor_id) {
+        return reply.status(400).send(error("時段缺少醫師或服務資訊"));
+      }
+
+      const result = await bookingEngine.createAppointment(tenantId, body);
       await notificationService.send({
         type: "created",
         booking_id: result.id,
@@ -48,7 +66,7 @@ export async function bookingAppointmentRoutes(fastify: FastifyInstance) {
   // ========== 查询预约列表 ==========
   fastify.get(
     "/api/booking/appointments",
-    { preHandler: [requireTenant] },
+    { preHandler: [requireAuth] },
     safeHandler(async (req, reply) => {
       const tenantId = (req as any).tenantId;
       const { patient_id } = req.query as { patient_id?: string };
@@ -94,7 +112,7 @@ export async function bookingAppointmentRoutes(fastify: FastifyInstance) {
   fastify.patch(
     "/api/booking/appointments/:id",
     {
-      preHandler: [requireTenant],
+      preHandler: [requireAuth],
       schema: {
         body: {
           type: "object",
@@ -129,7 +147,7 @@ export async function bookingAppointmentRoutes(fastify: FastifyInstance) {
   // ========== 取消预约 ==========
   fastify.delete(
     "/api/booking/appointments/:id",
-    { preHandler: [requireTenant] },
+    { preHandler: [requireAuth] },
     safeHandler(async (req, reply) => {
       const { id } = req.params as { id: string };
       if (!isValidUUID(id)) {
@@ -152,7 +170,7 @@ export async function bookingAppointmentRoutes(fastify: FastifyInstance) {
   // ========== 取得单笔预约详情（需要认证） ==========
   fastify.get(
     "/api/booking/appointments/:id",
-    { preHandler: [requireTenant, requireAuth] },
+    { preHandler: [requireAuth] },
     safeHandler(async (req, reply) => {
       const { id } = req.params as { id: string };
       const tenantId = (req as any).tenantId;

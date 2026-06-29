@@ -1,6 +1,7 @@
 // backend/src/routes/auth.ts
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { EmailAuthService } from "../services/emailAuth.js";
+import { safeHandler } from "../utils/controller-wrapper.js";  // ✅ 新增
 
 export async function authRoutes(
   fastify: FastifyInstance,
@@ -8,37 +9,55 @@ export async function authRoutes(
 ) {
   // ============================================================
   // 🟢 Email OTP 登入
-  // ============================================================
-
+  // ===========================================================
   // 發送 OTP
-  fastify.post("/api/auth/email/send-otp", async (req: FastifyRequest, reply: FastifyReply) => {
-    const { email } = req.body as { email: string };
-
-    try {
+  fastify.post(
+    "/api/auth/email/send-otp",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["email"],
+          properties: {
+            email: { type: "string", format: "email" },
+          },
+        },
+      },
+    },
+    safeHandler(async (req, reply) => {
+      const { email } = req.body as { email: string };
       const result = await emailAuthService.sendOtp(email);
       return reply.send(result);
-    } catch (error: any) {
-      return reply.status(500).send({ error: error.message });
-    }
-  });
+    })
+  );
 
   // 驗證 OTP
-  fastify.post("/api/auth/email/verify", async (req: FastifyRequest, reply: FastifyReply) => {
-    const { email, otp } = req.body as { email: string; otp: string };
-
-    try {
-      const result = await emailAuthService.verifyOtp(email, otp);
-      return reply.send({
-        success: true,
-        data: {
-          token: result.token,
-          user: result.user,
+  fastify.post(
+    "/api/auth/email/verify",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["email", "otp"],
+          properties: {
+            email: { type: "string", format: "email" },
+            otp: { type: "string", minLength: 6, maxLength: 6 },
+            clinic_code: { type: "string" },  // ✅ 新增
+          },
         },
-      });
-    } catch (error: any) {
-      return reply.status(400).send({ error: error.message });
-    }
-  });
+      },
+    },
+    safeHandler(async (req, reply) => {
+      const { email, otp, clinic_code } = req.body as {
+        email: string;
+        otp: string;
+        clinic_code?: string;
+      };
+
+      const result = await emailAuthService.verifyOtp(email, otp, clinic_code);
+      return reply.send(result);
+    })
+  );
 
   // ============================================================
   // 🟢 登出（前端處理，後端僅提供驗證）

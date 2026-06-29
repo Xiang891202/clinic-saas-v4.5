@@ -44,8 +44,8 @@ export class BookingEngine implements IBookingEngine {
         end_time,
         max_capacity,
         booked_count,
-        doctors ( id, name ),
-        services ( id, name, strict_cooldown_days )
+        doctor:doctor_id ( id, name ),
+        service:service_id ( id, name, strict_cooldown_days )
       `)
       .eq("tenant_id", tenantId)
       .eq("status", "open")
@@ -95,11 +95,10 @@ export class BookingEngine implements IBookingEngine {
       slot_date: slot.slot_date,
       start_time: slot.start_time,
       end_time: slot.end_time,
-      // ✅ 改成 `?.[0]?.` 的形式获取数组里的第一项
-      doctor_name: slot.doctors?.[0]?.name || "未知醫師", 
-      doctor_id: slot.doctors?.[0]?.id || "",
-      service_name: slot.services?.[0]?.name || "未知服務",
-      service_id: slot.services?.[0]?.id || "",
+      doctor_name: slot.doctor?.name || "未知醫師",    // ✅ 直接取用物件屬性
+      doctor_id: slot.doctor?.id || "",
+      service_name: slot.service?.name || "未知服務",  // ✅ 直接取用物件屬性
+      service_id: slot.service?.id || "",
       max_capacity: slot.max_capacity,
       booked_count: slot.booked_count,
     }));
@@ -114,7 +113,7 @@ export class BookingEngine implements IBookingEngine {
   ): Promise<SlotInstance[]> {
     const cooldownMap = new Map<string, number>();
     slots.forEach((slot) => {
-    const svc = slot.services?.[0];   // ✅ 取陣列中的第一個元素
+    const svc = slot.service;   // ✅ 直接取用物件
     if (svc?.id) {
       cooldownMap.set(svc.id, svc.strict_cooldown_days || 0);
     }
@@ -142,7 +141,7 @@ export class BookingEngine implements IBookingEngine {
     );
 
     return slots.filter((slot) => {
-      const svc = slot.services?.[0];
+      const svc = slot.service;
       if (!svc?.id) return true;
       const cd = cooldownMap.get(svc.id) || 0;
       return !(cd > 0 && cooldownServiceIds.has(svc.id));

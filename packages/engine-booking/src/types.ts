@@ -33,8 +33,8 @@ export interface SlotInstance {
   booked_count: number;
   status: string;          // ✅ 新增
   version: number;         // ✅ 新增
-  doctors: { id: string; name: string; }[];   // ✅ 移除 null
-  services: { id: string; name: string; strict_cooldown_days: number; }[]; // ✅ 移除 null
+  doctor: { id: string; name: string; } | null;    // ✅ 改為物件
+  service: { id: string; name: string; strict_cooldown_days: number; } | null;  // ✅ 改為物件
 }
 
 export interface RecentBooking {

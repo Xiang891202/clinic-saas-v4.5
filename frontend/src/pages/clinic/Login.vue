@@ -39,14 +39,24 @@ const handleLogin = async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "登入失敗");
 
-    localStorage.setItem("auth_token", data.data.token);
-    localStorage.setItem("auth_role", data.data.user.role);
-    localStorage.setItem("auth_tenant_id", data.data.user.tenant_id);
-    localStorage.setItem("auth_user_id", data.data.user.id);
-    localStorage.setItem("auth_user_name", data.data.user.email);
-    localStorage.setItem("clinic_token", data.data.token);
-    localStorage.setItem("clinic_tenant_id", data.data.user.tenant_id);
+    // ✅ 兼容 { token, user } 與 { data: { token, user } }
+    const token = data.token || data.data?.token;
+    const user = data.user || data.data?.user;
+    if (!token || !user) throw new Error("登入回應格式錯誤");
 
+    localStorage.setItem("auth_token", token);
+    localStorage.setItem("auth_role", user.role);
+    localStorage.setItem("auth_tenant_id", user.tenant_id);
+    localStorage.setItem("auth_user_id", user.id);
+    localStorage.setItem("auth_user_name", user.email);
+    localStorage.setItem("clinic_token", token);
+    localStorage.setItem("clinic_tenant_id", user.tenant_id);
+
+    if (data.hasFailedNotifications) {
+      // ✅ 顯示提示
+      alert(`⚠️ 有 ${data.failedNotificationCount} 筆通知發送失敗，請前往「通知失敗清單」查看`);
+      // 或使用 modal / toast 元件
+    }
     router.push("/clinic/dashboard");
   } catch (err: any) {
     error.value = err.message;

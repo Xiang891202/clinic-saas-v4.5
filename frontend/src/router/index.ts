@@ -30,6 +30,7 @@ import ClinicAppointments from "../pages/clinic/Appointments.vue";
 import ClinicSlots from "../pages/clinic/Slots.vue";
 import ClinicServices from "../pages/clinic/Services.vue";
 import ClinicPatients from "../pages/clinic/Patients.vue";
+import ClinicNotificationLogs from "../pages/clinic/NotificationLogs.vue"
 
 const routes = [
   { path: "/", component: HomePage },
@@ -53,12 +54,14 @@ const routes = [
   { path: "/booking", component: BookingPage, meta: { requiredRole: "patient" } },
   { path: "/my-appointments", component: MyAppointmentsPage, meta: { requiredRole: "patient" } },
   { path: "/booking/:id/edit", component: BookingEditPage, meta: { requiredRole: "patient" } },
+
   // 診所功能
   { path: "/clinic/dashboard", component: ClinicDashboard, meta: { requiredRole: "clinic_admin" } },
   { path: "/clinic/appointments", component: ClinicAppointments, meta: { requiredRole: "clinic_admin" } },
   { path: "/clinic/slots", component: ClinicSlots, meta: { requiredRole: "clinic_admin" } },
   { path: "/clinic/services", component: ClinicServices, meta: { requiredRole: "clinic_admin" } },
   { path: "/clinic/patients", component: ClinicPatients, meta: { requiredRole: "clinic_admin" } },
+  { path: "/clinic/notificationLogs", component: ClinicNotificationLogs, meta: { requiredRole: "clinic_admin" } },
 ];
 
 const router = createRouter({

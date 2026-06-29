@@ -5,7 +5,9 @@ export type PolicyEvent =
   | NotificationFailureEvent
   | QueueDepthHighEvent
   | ServiceDegradedEvent
-  | LoginAnomalyEvent;
+  | LoginAnomalyEvent
+  | LoginFailureExceededEvent
+  | ClinicLoginAlertEvent;       
 
 export interface BaseEvent {
   type: string;
@@ -48,6 +50,31 @@ export interface LoginAnomalyEvent extends BaseEvent {
     email: string;
     ip: string;
     failedAttempts: number;
+  };
+}
+
+export interface LoginFailureExceededEvent extends BaseEvent {
+  type: 'LOGIN_FAILURE_EXCEEDED';
+  context: {
+    email: string;
+    ip: string;
+    attempts: number;
+    lockedAt: Date;
+  };
+}
+
+export interface ClinicLoginAlertEvent extends BaseEvent {
+  type: 'CLINIC_LOGIN_ALERT';
+  context: {
+    email: string;
+    tenantId: string;
+    failedNotifications: Array<{
+      id: string;
+      bookingId: string;
+      channel: string;
+      error: string;
+      createdAt: Date;
+    }>;
   };
 }
 

@@ -52,16 +52,35 @@ const sendError = ref("");
 const sendSuccess = ref(false);
 const verifyError = ref("");
 
+const getClinicCode = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('c') || '';
+};
+
 const sendOtp = async () => {
   sendError.value = "";
   sendSuccess.value = false;
-  sending.value = true;
 
+  const clinicCode = getClinicCode();
+  if (!clinicCode) {
+    sendError.value = "請提供診所代碼（URL 需包含 ?c=xxx）";
+    return;
+  }
+
+  if (!email.value) {
+    sendError.value = "請輸入 Email";
+    return;
+  }
+
+  sending.value = true;
   try {
     const res = await fetch("/api/auth/email/send-otp", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: email.value }),
+      body: JSON.stringify({
+        email: email.value,
+        clinic_code: clinicCode,
+      }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "發送失敗");
@@ -77,8 +96,19 @@ const sendOtp = async () => {
 // frontend/src/pages/EmailLogin.vue - verifyOtp 函數
 const verifyOtp = async () => {
   verifyError.value = "";
-  verifying.value = true;
+  
+  const clinicCode = getClinicCode();
+  if (!clinicCode) {
+    verifyError.value = "請提供診所代碼";
+    return;
+  }
 
+  if (!otp.value) {
+    verifyError.value = "請輸入驗證碼";
+    return;
+  }
+
+  verifying.value = true;
   try {
     const res = await fetch("/api/auth/email/verify", {
       method: "POST",
@@ -86,28 +116,29 @@ const verifyOtp = async () => {
       body: JSON.stringify({
         email: email.value,
         otp: otp.value,
+        clinic_code: clinicCode,
       }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "驗證失敗");
 
-    // ✅ 儲存登入資訊
-    localStorage.setItem("auth_token", data.data.token);
-    localStorage.setItem("auth_role", data.data.user?.role || "patient");
-    localStorage.setItem("auth_tenant_id", data.data.user?.tenant_id || "550e8400-e29b-41d4-a716-446655440000");
-    localStorage.setItem("auth_user_id", data.data.user?.id || "");
-    localStorage.setItem("auth_user_name", data.data.user?.name || "使用者");
+    // ✅ 兼容兩種格式
+    const token = data.token || data.data?.token;
+    const user = data.user || data.data?.user;
+    if (!token || !user) throw new Error("登入回應格式錯誤");
 
-    // ✅ 檢查是否需要補齊個人資料
-    const needsProfile = data.data.needsProfile !== undefined ? data.data.needsProfile : true;
+    localStorage.setItem("auth_token", token);
+    localStorage.setItem("auth_role", user.role || "patient");
+    localStorage.setItem("auth_tenant_id", user.tenant_id || "");
+    localStorage.setItem("auth_user_id", user.id || "");
+    localStorage.setItem("auth_user_name", user.name || "使用者");
 
-    console.log("✅ 登入成功，needsProfile:", needsProfile);
+    const needsProfile = data.needsProfile !== undefined ? data.needsProfile : true;
 
-    // ✅ 根據需要跳轉
     if (needsProfile) {
-      window.location.href = "/patient/profile";
+      router.push("/patient/profile");
     } else {
-      window.location.href = "/patient-home";
+      router.push("/patient-home");
     }
   } catch (err: any) {
     console.error("❌ 驗證失敗:", err);

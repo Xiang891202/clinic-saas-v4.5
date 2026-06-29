@@ -35,6 +35,14 @@ function isLoginAnomalyEvent(event: PolicyEvent): event is LoginAnomalyEvent {
   return event.type === 'LOGIN_ANOMALY';
 }
 
+function isLoginFailureExceededEvent(event: PolicyEvent): event is LoginFailureExceededEvent {
+  return event.type === 'LOGIN_FAILURE_EXCEEDED';
+}
+
+function isClinicLoginAlertEvent(event: PolicyEvent): event is ClinicLoginAlertEvent {
+  return event.type === 'CLINIC_LOGIN_ALERT';
+}
+
 // ============ 规则定义 ============
 export const rules: Rule[] = [
   // 规则 1：通知失败 → 记录日志 + 降级（如果失败率过高）
@@ -142,7 +150,7 @@ export const rules: Rule[] = [
           type: 'LOG_EVENT',
           priority: 10,
           level: 'warn',
-          message: `登入异常: ${e.context.email} 失败 ${e.context.failedAttempts} 次`,
+          message: `登入異常: ${e.context.email} 失敗 ${e.context.failedAttempts} 次`,
           metadata: e.context,
         } as LogEventAction,
         {
@@ -150,9 +158,69 @@ export const rules: Rule[] = [
           priority: 5,
           channel: 'admin',
           severity: 'critical',
-          message: `登入异常: ${e.context.email} 尝试失败 ${e.context.failedAttempts} 次，IP ${e.context.ip}`,
+          message: `登入異常: ${e.context.email} 嘗試失敗 ${e.context.failedAttempts} 次，IP ${e.context.ip}`,
         } as SendAlertAction,
       ];
     },
   },
+
+  // 規則 5：登入失敗過多 → 告警管理員
+  {
+    name: 'login-failure-exceeded-handler',
+    priority: 2,
+    condition: (event) => isLoginFailureExceededEvent(event),
+    actions: (event) => {
+      const e = event as LoginFailureExceededEvent;
+      return [
+        {
+          type: 'SEND_ALERT',
+          priority: 1,
+          channel: 'admin',
+          severity: 'critical',
+          message: `⚠️ 帳號 ${e.context.email} 登入失敗 ${e.context.attempts} 次，已鎖定 15 分鐘`,
+          metadata: { ip: e.context.ip, lockedAt: e.context.lockedAt },
+        } as SendAlertAction,
+        {
+          type: 'LOG_EVENT',
+          priority: 10,
+          level: 'warn',
+          message: `登入失敗超標: ${e.context.email} (${e.context.attempts} 次)`,
+          metadata: e.context,
+        } as LogEventAction,
+      ];
+    },
+  },
+
+  // 規則 6：診所登入時有未處理失敗通知 → 提醒診所管理員
+  {
+    name: 'clinic-login-alert-handler',
+    priority: 3,
+    condition: (event) => isClinicLoginAlertEvent(event) && event.context.failedNotifications.length > 0,
+    actions: (event) => {
+      const e = event as ClinicLoginAlertEvent;
+      return [
+        {
+          type: 'SEND_ALERT',
+          priority: 2,
+          channel: 'tenant',
+          severity: 'warning',
+          message: `📋 診所 ${e.context.tenantId} 有 ${e.context.failedNotifications.length} 筆失敗通知待處理`,
+          metadata: { 
+            tenantId: e.context.tenantId,
+            email: e.context.email,
+            count: e.context.failedNotifications.length,
+            notifications: e.context.failedNotifications,
+          },
+        } as SendAlertAction,
+        {
+          type: 'LOG_EVENT',
+          priority: 10,
+          level: 'info',
+          message: `診所登入提醒: ${e.context.email} 有 ${e.context.failedNotifications.length} 筆失敗通知`,
+          metadata: e.context,
+        } as LogEventAction,
+      ];
+    },
+  },
+
 ];

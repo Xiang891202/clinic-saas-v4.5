@@ -62,6 +62,7 @@ const fetchSlots = async () => {
   }
 };
 
+// BookingPage.vue
 const bookSlot = async (slotId: string) => {
   bookingResult.value = null;
   error.value = "";
@@ -69,6 +70,16 @@ const bookSlot = async (slotId: string) => {
   const selectedSlot = slots.value.find(s => s.id === slotId);
   if (!selectedSlot) {
     error.value = "找不到該時段，請重新整理";
+    return;
+  }
+
+  // ✅ 檢查服務與醫師是否存在
+  if (!selectedSlot.service_id) {
+    error.value = "該時段未設定服務，無法預約";
+    return;
+  }
+  if (!selectedSlot.doctor_id) {
+    error.value = "該時段未設定醫師，無法預約";
     return;
   }
 
@@ -90,12 +101,7 @@ const bookSlot = async (slotId: string) => {
         source: "web",
       }),
     });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || "預約失敗");
-    }
-    bookingResult.value = await res.json();
-    await fetchSlots();
+    // ...
   } catch (err: any) {
     error.value = err.message;
   }

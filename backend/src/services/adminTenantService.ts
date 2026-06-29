@@ -1,5 +1,6 @@
 // backend/src/services/adminTenantService.ts
 import { SupabaseClient } from "@supabase/supabase-js";
+import { generatePublicCode } from '../../../packages/shared/src/tenant/tenantCode.ts';
 
 export interface Tenant {
   id: string;
@@ -98,6 +99,7 @@ export class AdminTenantService {
         phone: payload.phone || null,
         address: payload.address || null,
         status: payload.status || 'active',
+        public_code: publicCode,   // ✅ 新增
       })
       .select()
       .single();
@@ -109,7 +111,7 @@ export class AdminTenantService {
   /**
    * 更新租户
    */
-  async updateTenant(id: string, payload: Partial<Omit<Tenant, 'id' | 'created_at' | 'updated_at'>>) {
+    async updateTenant(id: string, payload: Partial<Omit<Tenant, 'id' | 'created_at' | 'updated_at'>> & { public_code?: string }) {
     const { data, error } = await this.supabase
       .from("tenants")
       .update({
@@ -149,4 +151,20 @@ export class AdminTenantService {
     if (error) throw new Error(error.message);
     return { success: true, message: "诊所已停用" };
   }
+
+  /**
+ * 根據 public_code 查詢租戶（B-5 用）
+ */
+  async getTenantByPublicCode(publicCode: string) {
+    const { data, error } = await this.supabase
+      .from("tenants")
+      .select("id, name, public_code, status")
+      .eq("public_code", publicCode)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    return data;
+  }
+
 }

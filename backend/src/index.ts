@@ -1,11 +1,11 @@
 ﻿// backend/src/index.ts
 import './config/bullmq.js';  // 放在最顶部（在所有其他导入之前）
-import { redis, redisConfig } from './config/redis.js';  // 引入 redisConfig
+import { redis, redisConfig } from './config/redis.js';
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "./config/supabase.js";
 import { BookingEngine } from "../../packages/engine-booking/src/index.ts";
 import { authRoutes } from "./routes/auth.js";
 import { healthRoutes } from "./routes/health.js";
@@ -17,10 +17,14 @@ import { adminPolicyRoutes } from "./routes/admin/policy.routes.js";
 import { DegradationMonitor } from "./monitors/degradationMonitor.js";
 import { QueueMonitor } from "./monitors/queueMonitor.js";
 import { NotificationService } from './services/notificationService.js';
+import { publicTenantRoutes } from "./routes/public/tenant.js";
 
 // ========== 导入 Policy Engine ==========
-// ✅ 修复：使用正确的导入路径
 import { PolicyEngine, ActionExecutor } from "../../packages/engine-policy/src/index.ts";
+
+import { BillingEngine } from "../../packages/engine-billing/src/index.ts";
+import { PaymentGatewayFactory } from "../../packages/shared/src/payment/index.ts";
+import { paymentRoutes } from "./routes/payment.js";
 
 // 导入拆分后的路由
 import {
@@ -34,6 +38,7 @@ import {
 
 import { clinicNotificationLogsRoutes } from "./routes/clinic/notification-logs.js";
 import { clinicBusinessHoursRoutes } from "./routes/clinic/business-hours.js";
+import { clinicNotificationRoutes } from "./routes/clinic/notification.js";
 
 import {
   bookingSlotRoutes,
@@ -49,37 +54,10 @@ import { adminAuthRoutes } from "./routes/admin/auth.js";
 import { adminEmailTestRoutes } from "./routes/admin/email-test.js";
 
 // ========== 初始化連線 ==========
-export const supabase = createClient(env.supabaseUrl, env.supabaseServiceRoleKey);
+// export const supabase = createClient(env.supabaseUrl, env.supabaseServiceRoleKey);
+export { supabase } from "./config/supabase.js";
 
-
-// ========== 初始化服務 ==========
-const emailAuthService = new EmailAuthService(
-  supabase,
-  redis,
-  env.jwtSecret,
-  {
-    host: env.smtpHost || "",
-    port: Number(env.smtpPort) || 587,
-    user: env.smtpUser || "",
-    pass: env.smtpPass || "",
-  }
-);
-
-const bookingEngine = new BookingEngine(supabase, redis);
-
-// 创建通知服务
-const notificationService = new NotificationService(supabase);
-
-// ========== ✅ 在 redis 就绪后创建队列和 Worker ==========
-import { createSlotGenerationWorker } from "./workers/slotGenerationWorker.js";
-import { scheduleSlotGeneration } from "./cron/slotGenerator.js";
-
-const slotWorker = createSlotGenerationWorker(redisConfig);
-scheduleSlotGeneration().catch(err => {
-  console.error("❌ 时段生成调度启动失败:", err);
-});
-
-// ========== ✅ 初始化 Policy Engine（必须在 Monitors 之前） ==========
+// ========== 初始化 Policy Engine（必須在 EmailAuthService 之前） ==========
 const policyEngine = new PolicyEngine();
 
 // 创建 Action Executor（注入依赖）
@@ -110,6 +88,40 @@ const executor = new ActionExecutor({
 console.log("✅ Policy Engine 已初始化");
 console.log("✅ Action Executor 已就绪");
 
+// ========== 初始化服務 ==========
+const emailAuthService = new EmailAuthService(
+  supabase,
+  redis,
+  env.jwtSecret,
+  {
+    host: env.smtpHost || "",
+    port: Number(env.smtpPort) || 587,
+    user: env.smtpUser || "",
+    pass: env.smtpPass || "",
+  },
+  policyEngine  // ✅ B-1: 傳入 PolicyEngine
+);
+
+const bookingEngine = new BookingEngine(supabase, redis);
+
+// 创建通知服务
+const notificationService = new NotificationService(supabase);
+
+// 建立金流閘道工廠（暫時使用 Stripe，待補金鑰）
+// 改為直接使用銀行轉帳（無需金鑰）：
+import { ManualBankTransferAdapter } from "../../packages/shared/src/payment/ManualBankTransferAdapter.js";
+const paymentGateway = new ManualBankTransferAdapter();
+const billingEngine = new BillingEngine(supabase, paymentGateway);
+
+// ========== ✅ 在 redis 就绪后创建队列和 Worker ==========
+import { createSlotGenerationWorker } from "./workers/slotGenerationWorker.js";
+import { scheduleSlotGeneration } from "./cron/slotGenerator.js";
+
+const slotWorker = createSlotGenerationWorker(redisConfig);
+scheduleSlotGeneration().catch(err => {
+  console.error("❌ 时段生成调度启动失败:", err);
+});
+
 // ========== ✅ 启动 Degradation Monitor（必须在 Policy Engine 之后） ==========
 const degradationMonitor = new DegradationMonitor(
   redis,
@@ -127,7 +139,7 @@ console.log("✅ Degradation Monitor 已调度");
 
 // ========== ✅ 启动 Queue Monitor（必须在 Policy Engine 之后） ==========
 const queueMonitor = new QueueMonitor(
-   { instance: redis, config: redisConfig }, // 👈 改成同時傳入主實例及配置物件
+   { instance: redis, config: redisConfig },
    policyEngine,
    executor,
    [
@@ -153,7 +165,8 @@ fastify.decorate("redis", redis);
 fastify.decorate("policyEngine", policyEngine);
 fastify.decorate("executor", executor);
 fastify.decorate("queueMonitor", queueMonitor);
-fastify.decorate('notificationService', notificationService); // 新增
+fastify.decorate('notificationService', notificationService);
+fastify.decorate("billingEngine", billingEngine);
 
 // ========== 註冊 Middleware ==========
 fastify.register(cors, { origin: true, credentials: true });
@@ -161,9 +174,8 @@ fastify.register(helmet);
 fastify.register(rateLimit, { 
   max: 100, 
   timeWindow: "1 minute",
-  redis: redis // 👈 強制將你的主 redis 實例傳入
+  redis: redis
 });
-
 
 // ========== 註冊路由 ==========
 
@@ -186,6 +198,11 @@ fastify.register(async (instance) => {
   await bookingAppointmentRoutes(instance);
 });
 
+// ✅ B-6: 公開診所列表 API
+fastify.register(async (instance) => {
+  await publicTenantRoutes(instance);
+});
+
 // 病人管理
 fastify.register(async (instance) => {
   await patientRoutes(instance);
@@ -193,7 +210,7 @@ fastify.register(async (instance) => {
 
 // 诊所管理（拆分后）
 fastify.register(async (instance) => {
-  await clinicAuthRoutes(instance);
+  await clinicAuthRoutes(instance, emailAuthService);  // ✅ 傳入 emailAuthService
 });
 
 fastify.register(async (instance) => {
@@ -224,6 +241,10 @@ fastify.register(async (instance) => {
   await clinicBusinessHoursRoutes(instance);
 });
 
+fastify.register(async (instance) => {
+  await clinicNotificationRoutes(instance);
+});
+
 // 管理监控
 fastify.register(async (instance) => {
   await adminMonitorRoutes(instance);
@@ -249,6 +270,10 @@ fastify.register(async (instance) => {
   await adminEmailTestRoutes(instance);
 });
 
+fastify.register(async (instance) => {
+  await paymentRoutes(instance);
+});
+
 // ========== 啟動伺服器 ==========
 fastify.listen({ port: 3000, host: "0.0.0.0" }, (err) => {
   if (err) throw err;
@@ -258,4 +283,5 @@ fastify.listen({ port: 3000, host: "0.0.0.0" }, (err) => {
   console.log("📌 告警历史: http://localhost:3000/api/admin/policy/alerts");
   console.log("📌 測試時段查詢: http://localhost:3000/api/booking/slots?date=2026-07-01");
   console.log("📌 建立預約: POST http://localhost:3000/api/booking/appointments");
+  console.log("📌 公開診所列表: GET http://localhost:3000/api/public/clinics"); // ✅ B-6
 });

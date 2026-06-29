@@ -171,23 +171,26 @@ Cron	Ctrl + C
 前端	Ctrl + C
 ngrok	Ctrl + C
 Docker (Redis)	docker-compose down
-📁 專案目錄結構摘要
-text
+
+# 📁 專案目錄結構摘要
 clinic-saas-v4.5/
 ├── apps/
-│   ├── api/                # Fastify API (backend)
-│   ├── worker/             # BullMQ Worker
-│   └── cron/               # 排程任務
+│ ├── api/ # Fastify API (backend)
+│ ├── worker/ # BullMQ Worker
+│ └── cron/ # 排程任務
 ├── packages/
-│   ├── engine-booking/     # 預約引擎
-│   ├── engine-policy/      # 🆕 決策引擎（自動降級、告警）
-│   ├── engine-auth/        # 認證引擎（待實作）
-│   └── shared/             # 共用工具（安全、金流、冪等性）
-├── frontend/               # Vue 3 + Vite
-├── backend/                # Fastify API (root)
+│ ├── engine-booking/ # 預約引擎
+│ ├── engine-policy/ # 🆕 決策引擎（自動降級、告警）
+│ ├── engine-billing/ # 🆕 金流引擎（訂金付款）
+│ ├── engine-reconcile/ # 🆕 對帳修復引擎
+│ └── shared/ # 共用工具（安全、金流、冪等性）
+├── frontend/ # Vue 3 + Vite
+├── backend/ # Fastify API (root)
 ├── supabase/
-│   └── migrations/         # 資料庫 Schema
-└── docker-compose.yml      # 本地 Redis
+│ └── migrations/ # 資料庫 Schema
+└── docker-compose.yml # 本地 Redis
+
+
 🆕 Phase 2 新增模組：engine-policy 作為唯一決策中心，負責處理通知失敗、佇列擁擠、登入異常等自動化場景，並統一輸出 ActionPlan 供 Executor 執行。
 
 🛠️ 常見問題
@@ -215,39 +218,81 @@ npx tsx watch src/index.ts
 ❌ ngrok: command not found
 請下載並安裝 ngrok：https://ngrok.com/download
 
+## ❓ 常見問題
+
+### 病人端登入顯示「請選擇診所」
+檢查 URL 是否包含 `?c=clinic_xxx`，或確認 `public_code` 已正確產生（管理端建立診所時自動生成）。
+
+### 診所端通知失敗清單無資料
+確認 `notification_logs` 表中有 `status = 'failed'` 且 `acknowledged IS NULL` 的記錄。可手動插入測試資料驗證。
+
+### 排程協調器測試失敗
+檢查 `schedule_coordination_logs` 表是否已建立，且 Redis 連線正常。
+
 📌 下一步
-Phase 2 已正式啟動，目前已完成：
+## 📌 Phase 2 完成狀態
 
-✅ 安全模組（帳號鎖定、IP 限流）
+### ✅ 已完成（Phase 2 批次 A + B + C 部分）
 
-✅ 金流抽象介面（Stripe、ECPay、銀行轉帳）
+| 類別 | 項目 | 狀態 |
+|------|------|------|
+| **基礎建設** | 安全模組（帳號鎖定、IP 限流） | ✅ 完成 |
+| | 金流抽象介面（Stripe / ECPay / 銀行轉帳） | ✅ 完成（待補金鑰） |
+| | 冪等性與排程去重（IdempotencyGuard、ScheduleDedupe） | ✅ 完成 |
+| | 統一佇列工廠（queues.ts） | ✅ 完成 |
+| **決策中心** | Policy Engine 基礎架構 | ✅ 完成 |
+| | Policy Engine 新規則（登入異常、診所登入告警） | ✅ 完成 |
+| **商業邏輯** | Billing Engine 訂金功能（後端） | ✅ 完成 |
+| | 排程協調器（scheduler.queue + 去重） | ✅ 完成 |
+| | tenants 表增加 public_code | ✅ 完成 |
+| | verify 支援 clinic_code | ✅ 完成 |
+| | 公開診所列表 API | ✅ 完成 |
+| **前端與整合** | 診所營業時間 API | ✅ 完成 |
+| | 通知失敗清單頁面（診所端） | ✅ 完成 |
+| | 郵件測試功能（管理端） | ✅ 完成 |
+| | 病人端診所識別（URL + 下拉選單） | ✅ 完成 |
 
-✅ 冪等性與排程去重
+### ⏳ 待完成（Phase 3+）
 
-✅ Policy Engine 基礎架構
-
-下一階段為 Phase 2 批次 B，包含：
-
-Policy Engine 新規則（登入異常、診所登入告警）
-
-Billing Engine 訂金功能
-
-排程協調器（scheduler.queue）
-
-更多細節請參閱 docs/ 資料夾中的開發規劃書。
-
-最後更新時間：2026 年 6 月 27 日
-
-text
+- 訂金付款流程（病人端）— 視需求啟用
+- 管理端 TOTP 登入與健康儀表板
+- 多醫師／多分院管理
+- 醫師請假自動化
+- Google 日曆同步
+- 週期性回診
+- 報表匯出
+- FHIR 整合
 
 ---
+
+## 🧪 Phase 2 功能驗證
+
+### 診所端通知失敗清單
+
+1. **登入診所端** → 點擊「通知失敗」按鈕
+2. **查看失敗通知列表**：顯示所有未確認的失敗通知
+3. **標記已確認**：點擊「確認」按鈕，通知從儀表板提示中消失
+4. **重試發送**：點擊「重試」按鈕，通知重新放入 BullMQ 佇列
+5. **批量確認**：勾選多筆通知，點擊「批量標記已確認」
+
+### 病人端診所識別
+
+- 訪問 `http://localhost:5174/email-login?c=clinic_93ea2216_260628`
+- 自動選取對應診所，無需手動選擇
+
+### 排程協調器測試
+
+```bash
+cd backend
+npx tsx test-scheduler.ts
 
 ## ✅ 更新重點
 
 | 項目 | 修改內容 |
 |------|----------|
 | 後端啟動指令 | `npm exec tsx watch src/index.ts` |
-| 前端啟動指令 | `npm run dev -- --port 5174` |
+| 測試排程協調 | `npx tsx test-scheduler.ts` |
+| 前端啟動指令 | `npm run dev -- --port 5174` http://localhost:5174/email-login?c=clinic_93ea2216_260628|
 | ngrok 啟動指令 | `ngrok http 5174` |
 | 服務啟動順序表 | 更新所有指令為 `npm exec tsx` |
 | 常見問題 | 新增 `npm exec tsx` 相關說明 |
